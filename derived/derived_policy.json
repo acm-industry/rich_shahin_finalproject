@@ -1,0 +1,1178 @@
+{
+  "version": "1.0.0",
+  "generated_at": "2026-05-13T22:19:51.386320+00:00",
+  "data_provenance": {
+    "n_historical": 10000,
+    "n_audited": 988,
+    "n_reclassified": 279,
+    "reclassification_parse_success": 279,
+    "reclassification_parse_failure": 0,
+    "n_over_escalated": 188,
+    "n_excluded_from_base_risk": 188,
+    "n_orphan_audits": 0,
+    "final_vs_trusted_match_rate": 1.0
+  },
+  "base_risk": {
+    "access_control": {
+      "label": "LOW",
+      "support": 297,
+      "modal_share": 0.6768,
+      "insufficient_history": false
+    },
+    "active_threat": {
+      "label": "EMERGENCY",
+      "support": 274,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "air_quality": {
+      "label": "MEDIUM",
+      "support": 259,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "appliance_kitchen": {
+      "label": "LOW",
+      "support": 268,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "auto_door": {
+      "label": "LOW",
+      "support": 274,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "carpet_floor": {
+      "label": "LOW",
+      "support": 274,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "controls_bms": {
+      "label": "LOW",
+      "support": 264,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "door_mechanical": {
+      "label": "LOW",
+      "support": 287,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "drainage_backup": {
+      "label": "LOW",
+      "support": 276,
+      "modal_share": 0.6196,
+      "insufficient_history": false
+    },
+    "entrapment": {
+      "label": "EMERGENCY",
+      "support": 270,
+      "modal_share": 0.6704,
+      "insufficient_history": false
+    },
+    "fire_smoke": {
+      "label": "EMERGENCY",
+      "support": 275,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "gas_chemical": {
+      "label": "EMERGENCY",
+      "support": 251,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "glass_damage": {
+      "label": "MEDIUM",
+      "support": 257,
+      "modal_share": 0.5759,
+      "insufficient_history": false
+    },
+    "infestation": {
+      "label": "LOW",
+      "support": 279,
+      "modal_share": 0.6344,
+      "insufficient_history": false
+    },
+    "landscaping": {
+      "label": "LOW",
+      "support": 268,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "lighting": {
+      "label": "LOW",
+      "support": 276,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "low_voltage_data": {
+      "label": "LOW",
+      "support": 268,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "malfunction": {
+      "label": "MEDIUM",
+      "support": 294,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "minor_issue": {
+      "label": "LOW",
+      "support": 267,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "no_cooling": {
+      "label": "LOW",
+      "support": 258,
+      "modal_share": 0.655,
+      "insufficient_history": false
+    },
+    "no_heating": {
+      "label": "LOW",
+      "support": 306,
+      "modal_share": 0.6438,
+      "insufficient_history": false
+    },
+    "panel_hazard": {
+      "label": "EMERGENCY",
+      "support": 275,
+      "modal_share": 0.7382,
+      "insufficient_history": false
+    },
+    "parking_lighting": {
+      "label": "LOW",
+      "support": 281,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "pavement_damage": {
+      "label": "LOW",
+      "support": 284,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "pipe_leak": {
+      "label": "HIGH",
+      "support": 261,
+      "modal_share": 0.4598,
+      "insufficient_history": false
+    },
+    "power_outage": {
+      "label": "HIGH",
+      "support": 260,
+      "modal_share": 0.4769,
+      "insufficient_history": false
+    },
+    "refrigerant": {
+      "label": "LOW",
+      "support": 282,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "restroom_fixture": {
+      "label": "LOW",
+      "support": 278,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "restroom_supplies": {
+      "label": "LOW",
+      "support": 261,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "roof_leak": {
+      "label": "MEDIUM",
+      "support": 269,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "signage_fencing": {
+      "label": "LOW",
+      "support": 263,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    },
+    "slip_trip": {
+      "label": "LOW",
+      "support": 271,
+      "modal_share": 0.6568,
+      "insufficient_history": false
+    },
+    "structural": {
+      "label": "HIGH",
+      "support": 280,
+      "modal_share": 0.8571,
+      "insufficient_history": false
+    },
+    "suspicious_person": {
+      "label": "MEDIUM",
+      "support": 276,
+      "modal_share": 0.6014,
+      "insufficient_history": false
+    },
+    "unauthorized_access": {
+      "label": "HIGH",
+      "support": 276,
+      "modal_share": 0.8732,
+      "insufficient_history": false
+    },
+    "waste_odor": {
+      "label": "LOW",
+      "support": 253,
+      "modal_share": 1.0,
+      "insufficient_history": false
+    }
+  },
+  "upgrade_rate": {
+    "drainage_backup": 0.0109,
+    "restroom_fixture": 0.0,
+    "gas_chemical": 0.0239,
+    "slip_trip": 0.0037,
+    "parking_lighting": 0.0,
+    "appliance_kitchen": 0.0,
+    "structural": 0.025,
+    "carpet_floor": 0.0,
+    "controls_bms": 0.0,
+    "no_heating": 0.0033,
+    "entrapment": 0.0185,
+    "lighting": 0.0,
+    "access_control": 0.0034,
+    "landscaping": 0.0,
+    "pavement_damage": 0.0,
+    "low_voltage_data": 0.0,
+    "suspicious_person": 0.0,
+    "fire_smoke": 0.0109,
+    "door_mechanical": 0.0,
+    "air_quality": 0.0039,
+    "panel_hazard": 0.0218,
+    "active_threat": 0.0146,
+    "waste_odor": 0.0,
+    "minor_issue": 0.0,
+    "restroom_supplies": 0.0,
+    "power_outage": 0.0192,
+    "auto_door": 0.0,
+    "glass_damage": 0.0,
+    "roof_leak": 0.0,
+    "no_cooling": 0.0039,
+    "malfunction": 0.0272,
+    "refrigerant": 0.0,
+    "signage_fencing": 0.0,
+    "unauthorized_access": 0.0181,
+    "infestation": 0.0143,
+    "pipe_leak": 0.0307
+  },
+  "downgrade_rate": {
+    "drainage_backup": 0.0072,
+    "restroom_fixture": 0.0252,
+    "gas_chemical": 0.0,
+    "slip_trip": 0.0111,
+    "parking_lighting": 0.0,
+    "appliance_kitchen": 0.0037,
+    "structural": 0.0,
+    "carpet_floor": 0.0328,
+    "controls_bms": 0.0,
+    "no_heating": 0.0,
+    "entrapment": 0.0,
+    "lighting": 0.0072,
+    "access_control": 0.0,
+    "landscaping": 0.0112,
+    "pavement_damage": 0.0035,
+    "low_voltage_data": 0.0187,
+    "suspicious_person": 0.0399,
+    "fire_smoke": 0.0,
+    "door_mechanical": 0.0,
+    "air_quality": 0.0232,
+    "panel_hazard": 0.0073,
+    "active_threat": 0.0,
+    "waste_odor": 0.0198,
+    "minor_issue": 0.0112,
+    "restroom_supplies": 0.0,
+    "power_outage": 0.0038,
+    "auto_door": 0.0,
+    "glass_damage": 0.0078,
+    "roof_leak": 0.0186,
+    "no_cooling": 0.0,
+    "malfunction": 0.0204,
+    "refrigerant": 0.0106,
+    "signage_fencing": 0.038,
+    "unauthorized_access": 0.0,
+    "infestation": 0.0,
+    "pipe_leak": 0.0
+  },
+  "over_escalation_rate": {
+    "drainage_backup": 0.0,
+    "restroom_fixture": 0.0,
+    "gas_chemical": 0.1788,
+    "slip_trip": 0.0,
+    "parking_lighting": 0.0,
+    "appliance_kitchen": 0.0,
+    "structural": 0.0946,
+    "carpet_floor": 0.0,
+    "controls_bms": 0.0,
+    "no_heating": 0.0,
+    "entrapment": 0.0751,
+    "lighting": 0.0,
+    "access_control": 0.0,
+    "landscaping": 0.0,
+    "pavement_damage": 0.0,
+    "low_voltage_data": 0.0,
+    "suspicious_person": 0.0,
+    "fire_smoke": 0.1617,
+    "door_mechanical": 0.0,
+    "air_quality": 0.0,
+    "panel_hazard": 0.0,
+    "active_threat": 0.0946,
+    "waste_odor": 0.0,
+    "minor_issue": 0.0,
+    "restroom_supplies": 0.0,
+    "power_outage": 0.0,
+    "auto_door": 0.0,
+    "glass_damage": 0.0,
+    "roof_leak": 0.0,
+    "no_cooling": 0.0,
+    "malfunction": 0.0,
+    "refrigerant": 0.0,
+    "signage_fencing": 0.0,
+    "unauthorized_access": 0.0,
+    "infestation": 0.0,
+    "pipe_leak": 0.0
+  },
+  "over_escalation_rate_diagnostics": {
+    "drainage_backup": {
+      "oe_confirmed": 0,
+      "intake_pop": 277,
+      "audit_coverage": 0.1047,
+      "low_support": false
+    },
+    "restroom_fixture": {
+      "oe_confirmed": 0,
+      "intake_pop": 284,
+      "audit_coverage": 0.0986,
+      "low_support": false
+    },
+    "gas_chemical": {
+      "oe_confirmed": 54,
+      "intake_pop": 302,
+      "audit_coverage": 0.2351,
+      "low_support": false
+    },
+    "slip_trip": {
+      "oe_confirmed": 0,
+      "intake_pop": 282,
+      "audit_coverage": 0.1454,
+      "low_support": false
+    },
+    "parking_lighting": {
+      "oe_confirmed": 0,
+      "intake_pop": 279,
+      "audit_coverage": 0.0609,
+      "low_support": false
+    },
+    "appliance_kitchen": {
+      "oe_confirmed": 0,
+      "intake_pop": 262,
+      "audit_coverage": 0.0534,
+      "low_support": false
+    },
+    "structural": {
+      "oe_confirmed": 30,
+      "intake_pop": 317,
+      "audit_coverage": 0.1893,
+      "low_support": false
+    },
+    "carpet_floor": {
+      "oe_confirmed": 0,
+      "intake_pop": 263,
+      "audit_coverage": 0.0494,
+      "low_support": false
+    },
+    "controls_bms": {
+      "oe_confirmed": 0,
+      "intake_pop": 266,
+      "audit_coverage": 0.0714,
+      "low_support": false
+    },
+    "no_heating": {
+      "oe_confirmed": 0,
+      "intake_pop": 301,
+      "audit_coverage": 0.0365,
+      "low_support": false
+    },
+    "entrapment": {
+      "oe_confirmed": 22,
+      "intake_pop": 293,
+      "audit_coverage": 0.1536,
+      "low_support": false
+    },
+    "lighting": {
+      "oe_confirmed": 0,
+      "intake_pop": 280,
+      "audit_coverage": 0.0643,
+      "low_support": false
+    },
+    "access_control": {
+      "oe_confirmed": 0,
+      "intake_pop": 300,
+      "audit_coverage": 0.0733,
+      "low_support": false
+    },
+    "landscaping": {
+      "oe_confirmed": 0,
+      "intake_pop": 265,
+      "audit_coverage": 0.0528,
+      "low_support": false
+    },
+    "pavement_damage": {
+      "oe_confirmed": 0,
+      "intake_pop": 275,
+      "audit_coverage": 0.0618,
+      "low_support": false
+    },
+    "low_voltage_data": {
+      "oe_confirmed": 0,
+      "intake_pop": 264,
+      "audit_coverage": 0.053,
+      "low_support": false
+    },
+    "suspicious_person": {
+      "oe_confirmed": 0,
+      "intake_pop": 270,
+      "audit_coverage": 0.0963,
+      "low_support": false
+    },
+    "fire_smoke": {
+      "oe_confirmed": 54,
+      "intake_pop": 334,
+      "audit_coverage": 0.2485,
+      "low_support": false
+    },
+    "door_mechanical": {
+      "oe_confirmed": 0,
+      "intake_pop": 281,
+      "audit_coverage": 0.0641,
+      "low_support": false
+    },
+    "air_quality": {
+      "oe_confirmed": 0,
+      "intake_pop": 261,
+      "audit_coverage": 0.0843,
+      "low_support": false
+    },
+    "panel_hazard": {
+      "oe_confirmed": 0,
+      "intake_pop": 270,
+      "audit_coverage": 0.0815,
+      "low_support": false
+    },
+    "active_threat": {
+      "oe_confirmed": 28,
+      "intake_pop": 296,
+      "audit_coverage": 0.1419,
+      "low_support": false
+    },
+    "waste_odor": {
+      "oe_confirmed": 0,
+      "intake_pop": 264,
+      "audit_coverage": 0.1212,
+      "low_support": false
+    },
+    "minor_issue": {
+      "oe_confirmed": 0,
+      "intake_pop": 269,
+      "audit_coverage": 0.0632,
+      "low_support": false
+    },
+    "restroom_supplies": {
+      "oe_confirmed": 0,
+      "intake_pop": 250,
+      "audit_coverage": 0.048,
+      "low_support": false
+    },
+    "power_outage": {
+      "oe_confirmed": 0,
+      "intake_pop": 263,
+      "audit_coverage": 0.0913,
+      "low_support": false
+    },
+    "auto_door": {
+      "oe_confirmed": 0,
+      "intake_pop": 277,
+      "audit_coverage": 0.1155,
+      "low_support": false
+    },
+    "glass_damage": {
+      "oe_confirmed": 0,
+      "intake_pop": 255,
+      "audit_coverage": 0.0706,
+      "low_support": false
+    },
+    "roof_leak": {
+      "oe_confirmed": 0,
+      "intake_pop": 271,
+      "audit_coverage": 0.0738,
+      "low_support": false
+    },
+    "no_cooling": {
+      "oe_confirmed": 0,
+      "intake_pop": 270,
+      "audit_coverage": 0.1148,
+      "low_support": false
+    },
+    "malfunction": {
+      "oe_confirmed": 0,
+      "intake_pop": 291,
+      "audit_coverage": 0.0962,
+      "low_support": false
+    },
+    "refrigerant": {
+      "oe_confirmed": 0,
+      "intake_pop": 278,
+      "audit_coverage": 0.0719,
+      "low_support": false
+    },
+    "signage_fencing": {
+      "oe_confirmed": 0,
+      "intake_pop": 253,
+      "audit_coverage": 0.0632,
+      "low_support": false
+    },
+    "unauthorized_access": {
+      "oe_confirmed": 0,
+      "intake_pop": 290,
+      "audit_coverage": 0.1207,
+      "low_support": false
+    },
+    "infestation": {
+      "oe_confirmed": 0,
+      "intake_pop": 271,
+      "audit_coverage": 0.0627,
+      "low_support": false
+    },
+    "pipe_leak": {
+      "oe_confirmed": 0,
+      "intake_pop": 276,
+      "audit_coverage": 0.1449,
+      "low_support": false
+    }
+  },
+  "cost_gap": {
+    "drainage_backup": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 171,
+      "high_n": 0
+    },
+    "restroom_fixture": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 278,
+      "high_n": 0
+    },
+    "gas_chemical": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 0,
+      "high_n": 0
+    },
+    "slip_trip": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 178,
+      "high_n": 0
+    },
+    "parking_lighting": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 281,
+      "high_n": 0
+    },
+    "appliance_kitchen": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 264,
+      "high_n": 0
+    },
+    "structural": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 0,
+      "high_n": 240
+    },
+    "carpet_floor": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 274,
+      "high_n": 0
+    },
+    "controls_bms": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 264,
+      "high_n": 0
+    },
+    "no_heating": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 197,
+      "high_n": 0
+    },
+    "entrapment": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 0,
+      "high_n": 89
+    },
+    "lighting": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 276,
+      "high_n": 0
+    },
+    "access_control": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 201,
+      "high_n": 0
+    },
+    "landscaping": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 268,
+      "high_n": 0
+    },
+    "pavement_damage": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 284,
+      "high_n": 0
+    },
+    "low_voltage_data": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 268,
+      "high_n": 0
+    },
+    "suspicious_person": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 1,
+      "high_n": 105
+    },
+    "fire_smoke": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 0,
+      "high_n": 0
+    },
+    "door_mechanical": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 287,
+      "high_n": 0
+    },
+    "air_quality": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 7,
+      "high_n": 0
+    },
+    "panel_hazard": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 0,
+      "high_n": 72
+    },
+    "active_threat": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 0,
+      "high_n": 0
+    },
+    "waste_odor": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 291,
+      "high_n": 0
+    },
+    "minor_issue": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 267,
+      "high_n": 0
+    },
+    "restroom_supplies": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 261,
+      "high_n": 0
+    },
+    "power_outage": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 0,
+      "high_n": 124
+    },
+    "auto_door": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 274,
+      "high_n": 0
+    },
+    "glass_damage": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 0,
+      "high_n": 0
+    },
+    "roof_leak": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 4,
+      "high_n": 0
+    },
+    "no_cooling": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 169,
+      "high_n": 0
+    },
+    "malfunction": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 3,
+      "high_n": 0
+    },
+    "refrigerant": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 235,
+      "high_n": 0
+    },
+    "signage_fencing": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 263,
+      "high_n": 0
+    },
+    "unauthorized_access": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 0,
+      "high_n": 241
+    },
+    "infestation": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 177,
+      "high_n": 0
+    },
+    "pipe_leak": {
+      "minutes": null,
+      "weighted": null,
+      "low_n": 0,
+      "high_n": 120
+    }
+  },
+  "band_cutoffs": {
+    "p_low_to_medium": 0.2597,
+    "p_medium_to_high": 0.4194,
+    "p_high_to_emergency": 0.475,
+    "method": "empirical_band_freq",
+    "n_scored": 9812,
+    "band_freqs": {
+      "LOW": 5441,
+      "HIGH": 1096,
+      "MEDIUM": 1965,
+      "EMERGENCY": 1310
+    }
+  },
+  "hitl_params": {
+    "cutoff_M": 0.55,
+    "theta_OE": 0.05,
+    "_origin": "sweep_dev",
+    "sweep_objective": "hitl_f1 + risk_acc + 0.5 * auto_rate",
+    "sweep_best_score": 1.4779
+  },
+  "sweep_table": [
+    {
+      "cutoff_M": 0.55,
+      "theta_OE": 0.05,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.55,
+      "theta_OE": 0.1,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.55,
+      "theta_OE": 0.15,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.55,
+      "theta_OE": 0.2,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.55,
+      "theta_OE": 0.25,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.55,
+      "theta_OE": 0.3,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.6,
+      "theta_OE": 0.05,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.6,
+      "theta_OE": 0.1,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.6,
+      "theta_OE": 0.15,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.6,
+      "theta_OE": 0.2,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.6,
+      "theta_OE": 0.25,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.6,
+      "theta_OE": 0.3,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.65,
+      "theta_OE": 0.05,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.65,
+      "theta_OE": 0.1,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.65,
+      "theta_OE": 0.15,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.65,
+      "theta_OE": 0.2,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.65,
+      "theta_OE": 0.25,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.65,
+      "theta_OE": 0.3,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.7,
+      "theta_OE": 0.05,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.7,
+      "theta_OE": 0.1,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.7,
+      "theta_OE": 0.15,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.7,
+      "theta_OE": 0.2,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.7,
+      "theta_OE": 0.25,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.7,
+      "theta_OE": 0.3,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.75,
+      "theta_OE": 0.05,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.75,
+      "theta_OE": 0.1,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.75,
+      "theta_OE": 0.15,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.75,
+      "theta_OE": 0.2,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.75,
+      "theta_OE": 0.25,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    },
+    {
+      "cutoff_M": 0.75,
+      "theta_OE": 0.3,
+      "hitl_f1": 0.5512,
+      "risk_level_acc": 0.515,
+      "auto_resolution_rate": 0.8235,
+      "score": 1.4779,
+      "tp": 35,
+      "fp": 33,
+      "fn": 24
+    }
+  ],
+  "lexicons": {
+    "danger_words": [
+      "fire",
+      "gas",
+      "trapped",
+      "threat",
+      "chemical",
+      "collapse",
+      "smoke",
+      "entrapment"
+    ],
+    "urgency_words": [
+      "urgent",
+      "emergency",
+      "now",
+      "immediately",
+      "right away",
+      "asap",
+      "hurry",
+      "quickly",
+      "fast",
+      "soon",
+      "right now",
+      "stuck",
+      "help"
+    ]
+  },
+  "severity_weights": {
+    "Critical": 1.0,
+    "High": 0.75,
+    "Medium": 0.4,
+    "Low": 0.15
+  },
+  "risk_score_weights": {
+    "severity": 0.4,
+    "confidence": 0.35,
+    "urgency": 0.25
+  },
+  "band_override_threshold": 2,
+  "consensus_min_agreement": 0.6,
+  "consensus_conf_haircut": 0.7,
+  "low_conf_reason_threshold": 0.7,
+  "high_urgency_reason_threshold": 3
+}

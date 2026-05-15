@@ -22,7 +22,7 @@ from typing import Annotated, Literal, Optional, TypedDict
 from dotenv import load_dotenv
 
 load_dotenv()
-load_dotenv(Path(__file__).resolve().parent.parent / "Week5" / ".env")
+# load_dotenv(Path(__file__).resolve().parent.parent / "Week5" / ".env")
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_chroma import Chroma
@@ -37,15 +37,33 @@ warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
 
 HERE = Path(__file__).resolve().parent
 OPS = HERE / "operational"
+DERIVED = HERE / "derived"
 CHROMA_DIR = str(HERE / "chroma_db")
 
 _buildings = json.loads((OPS / "buildings.json").read_text())
 _vendors = json.loads((OPS / "vendors.json").read_text())
 _profiles = json.loads((OPS / "caller_profiles.json").read_text())
+_policy = json.loads((DERIVED / "derived_policy.json").read_text())
+_BASE_RISK = _policy["base_risk"]
 
 _building_by_name: dict[str, dict] = {b["name"].lower(): b for b in _buildings}
 _building_by_id: dict[str, dict] = {b["building_id"]: b for b in _buildings}
 _profile_by_phone: dict[str, dict] = {p["phone_number"]: p for p in _profiles}
+
+
+def _build_priors_block(base_risk: dict) -> str:
+    rows = sorted(base_risk.items(), key=lambda kv: (-kv[1].get("modal_share", 0), kv[0]))
+    lines = []
+    for sub, p in rows:
+        if p.get("insufficient_history"):
+            continue
+        share_pct = int(round(p["modal_share"] * 100))
+        marker = "  (ambiguous)" if p["modal_share"] < 0.70 else ""
+        lines.append(f"  {sub:<22} → {p['label']:<9} ({share_pct}% of {p['support']} historical){marker}")
+    return "\n".join(lines)
+
+
+_PRIORS_BLOCK = _build_priors_block(_BASE_RISK)
 
 # ── Taxonomy ────────────────────────────────────────────────────────────────
 
@@ -271,8 +289,18 @@ EXTRACT_AND_CHECK_PROMPT = (
     "- Upset visitor who left peacefully → Medium, not Critical\n"
     "- Single water-damaged ceiling tile → Medium, not Critical\n\n"
     "Quality check: set description_specific_enough=true if the problem is a specific symptom.\n"
-    "Set needs_clarification=true only if the description is genuinely too vague to classify "
-    "or a safety-critical detail is ambiguous or location is conflicting.\n\n"
+    "Set needs_clarification=true when ANY of the following hold:\n"
+    "  - The description is genuinely too vague to classify (e.g., 'something's wrong upstairs', 'there's an issue').\n"
+    "  - The wording sounds specific but is materially ambiguous between a safe and a dangerous subcategory.\n"
+    "    A noun + verb is NOT enough on its own — ask whether the next dispatcher could pick the right vendor and risk level from this alone.\n"
+    "    Examples that SHOULD trigger clarification:\n"
+    "      • 'Ceiling piece fell' — could be a single drop-ceiling tile (MEDIUM) or structural collapse (HIGH/EMERGENCY).\n"
+    "      • 'Smells funny in here' / 'weird smell' — could be burnt food (LOW), cleaning fumes (LOW), or a real gas leak (EMERGENCY).\n"
+    "      • 'Something's leaking upstairs' — could be a contained drip (LOW) or a pipe flooding multiple floors (HIGH).\n"
+    "      • 'The elevator's acting up' — could be slow doors (LOW), stuck-empty (MEDIUM), or entrapment (EMERGENCY).\n"
+    "      • 'Someone's in here who shouldn't be' — could be a lost visitor (LOW) or an active threat (EMERGENCY).\n"
+    "  - Location is conflicting (caller's stated building differs from profile) or completely missing on a non-routine call.\n"
+    "Do NOT flag clarification just because some optional detail is missing — only when the missing info would change the vendor or risk level.\n\n"
     "Caller description: {description}"
 )
 
@@ -294,6 +322,16 @@ RISK LEVELS (about 55% of calls are LOW — use LOW as the default unless clearl
 - EMERGENCY: immediate threat to life. Warrants 911.
   Typical: confirmed gas leak (rotten egg smell), visible flames, person physically trapped and unresponsive, active armed threat, structural collapse.
   Key: someone could die or be seriously injured RIGHT NOW.
+
+─── HISTORICAL PRIORS (10,000 closed tickets) ───
+For each subcategory, the modal risk_level observed in past resolved cases:
+{priors}
+
+How to use this:
+- This is the historical DEFAULT risk_level for each subcategory. Lean toward it unless the transcript provides clear, specific evidence to go higher or lower.
+- Rows marked "(ambiguous)" have concentration < 70% — the subcategory genuinely varies in severity, so weight the transcript more heavily.
+- Only YOU have the transcript. If the caller says "huge structural collapse, evacuating now," go higher than the prior. If they say "tiny drip in corner, no damage," go lower. But absent strong transcript signals, the historical default is your best guess.
+- A subcategory with modal_share = 100% is essentially unambiguous in history — deviate only with very strong transcript evidence.
 
 ─── OVER-ESCALATION RULES (critical — violating these incurs a penalty) ───
 These situations are NOT emergencies. Do NOT classify them as fire_smoke, gas_chemical, entrapment, active_threat, or structural:
@@ -318,11 +356,18 @@ TRUE when:
 FALSE when: routine LOW/MEDIUM with clear, unambiguous classification AND no initial danger signals.
 
 ─── CLARIFICATION (needs_clarification) ───
-TRUE when:
-1. The caller's description is genuinely vague — you cannot confidently pick a specific subcategory
-2. A safety-critical detail is missing that would change classification (unclear if real fire vs smell, unclear if person trapped vs elevator just broken, unclear severity of hazard)
-3. Location information is conflicting or missing (caller mentions one building but profile says another, or no location at all)
-FALSE for most calls (~84% don't need it). Only flag when the missing info would materially change dispatch.
+TRUE when ANY of these hold — a wording that sounds specific can still be ambiguous:
+1. The description is genuinely vague ("something's wrong upstairs", "there's an issue") — you cannot pick a specific subcategory.
+2. A safety-critical detail is missing that would change classification. The test: could a different reasonable reading flip the subcategory or risk level?
+   Concrete cases that SHOULD be TRUE:
+   • "Ceiling piece fell" — single tile (MEDIUM) vs. structural collapse (HIGH/EMERGENCY).
+   • "Smells funny" / "weird smell" — burnt food (LOW) vs. cleaning fumes (LOW) vs. gas leak (EMERGENCY).
+   • "Something's leaking upstairs" — contained drip (LOW) vs. flooding multiple floors (HIGH).
+   • "Elevator's acting up" — slow doors (LOW) vs. stuck-empty (MEDIUM) vs. entrapment (EMERGENCY).
+   • "Someone in here who shouldn't be" — lost visitor (LOW) vs. active threat (EMERGENCY).
+   • "Sparking outlet" with no mention of whether breaker tripped — panel_hazard MEDIUM vs. active electrical fire.
+3. Location is conflicting (caller's building ≠ profile) or absent on a non-routine call.
+FALSE only when the call is clearly unambiguous (single-tenant clogged sink with location, burnt-out bulb, empty soap dispenser, routine AC complaint with known caller). Do NOT auto-default to FALSE — re-check each call against the test above.
 
 ─── EMERGENCY SERVICES (dispatched_emergency_services) ───
 TRUE ONLY for: confirmed visible fire, confirmed hazardous gas leak, person physically trapped and unable to exit, active threat involving violence or weapons.
@@ -628,6 +673,7 @@ def make_classify_issue(llm: ChatOpenAI):
         prompt = CLASSIFY_PROMPT.format(
             taxonomy=_TAXONOMY_BLOCK,
             buildings=_BUILDINGS_BLOCK,
+            priors=_PRIORS_BLOCK,
             rag_context=state.get("retrieved_context", "None"),
             entities=entities_str,
             transcript=state["transcript"],
