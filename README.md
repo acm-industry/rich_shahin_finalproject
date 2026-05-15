@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-# rich_shahin_finalproject
-=======
 # UCSB Agentic AI — Final Project
 
 Build a Human-in-the-Loop (HITL) agentic voice bot that automates an international
