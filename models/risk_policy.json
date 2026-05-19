@@ -1,0 +1,297 @@
+{
+  "threshold_pct": 5.0,
+  "caps": {
+    "access_control": "MEDIUM",
+    "active_threat": "EMERGENCY",
+    "air_quality": "MEDIUM",
+    "appliance_kitchen": "LOW",
+    "auto_door": "LOW",
+    "carpet_floor": "LOW",
+    "controls_bms": "LOW",
+    "door_mechanical": "LOW",
+    "drainage_backup": "MEDIUM",
+    "entrapment": "EMERGENCY",
+    "fire_smoke": "EMERGENCY",
+    "gas_chemical": "EMERGENCY",
+    "glass_damage": "HIGH",
+    "infestation": "MEDIUM",
+    "landscaping": "LOW",
+    "lighting": "LOW",
+    "low_voltage_data": "LOW",
+    "malfunction": "MEDIUM",
+    "minor_issue": "LOW",
+    "no_cooling": "MEDIUM",
+    "no_heating": "MEDIUM",
+    "panel_hazard": "EMERGENCY",
+    "parking_lighting": "LOW",
+    "pavement_damage": "LOW",
+    "pipe_leak": "EMERGENCY",
+    "power_outage": "EMERGENCY",
+    "refrigerant": "LOW",
+    "restroom_fixture": "LOW",
+    "restroom_supplies": "LOW",
+    "roof_leak": "MEDIUM",
+    "signage_fencing": "LOW",
+    "slip_trip": "MEDIUM",
+    "structural": "EMERGENCY",
+    "suspicious_person": "HIGH",
+    "unauthorized_access": "EMERGENCY",
+    "waste_odor": "LOW"
+  },
+  "distribution": {
+    "access_control": {
+      "LOW": 0.6768,
+      "MEDIUM": 0.3232,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "active_threat": {
+      "LOW": 0.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 1.0
+    },
+    "air_quality": {
+      "LOW": 0.0223,
+      "MEDIUM": 0.9777,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "appliance_kitchen": {
+      "LOW": 1.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "auto_door": {
+      "LOW": 1.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "carpet_floor": {
+      "LOW": 1.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "controls_bms": {
+      "LOW": 1.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "door_mechanical": {
+      "LOW": 1.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "drainage_backup": {
+      "LOW": 0.6196,
+      "MEDIUM": 0.3804,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "entrapment": {
+      "LOW": 0.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.3296,
+      "EMERGENCY": 0.6704
+    },
+    "fire_smoke": {
+      "LOW": 0.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 1.0
+    },
+    "gas_chemical": {
+      "LOW": 0.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 1.0
+    },
+    "glass_damage": {
+      "LOW": 0.0,
+      "MEDIUM": 0.5759,
+      "HIGH": 0.4086,
+      "EMERGENCY": 0.0156
+    },
+    "infestation": {
+      "LOW": 0.6344,
+      "MEDIUM": 0.3656,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "landscaping": {
+      "LOW": 1.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "lighting": {
+      "LOW": 1.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "low_voltage_data": {
+      "LOW": 1.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "malfunction": {
+      "LOW": 0.0095,
+      "MEDIUM": 0.9905,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "minor_issue": {
+      "LOW": 1.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "no_cooling": {
+      "LOW": 0.655,
+      "MEDIUM": 0.345,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "no_heating": {
+      "LOW": 0.6438,
+      "MEDIUM": 0.3562,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "panel_hazard": {
+      "LOW": 0.0,
+      "MEDIUM": 0.0517,
+      "HIGH": 0.2483,
+      "EMERGENCY": 0.7
+    },
+    "parking_lighting": {
+      "LOW": 1.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "pavement_damage": {
+      "LOW": 1.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "pipe_leak": {
+      "LOW": 0.0,
+      "MEDIUM": 0.433,
+      "HIGH": 0.4598,
+      "EMERGENCY": 0.1073
+    },
+    "power_outage": {
+      "LOW": 0.0,
+      "MEDIUM": 0.4692,
+      "HIGH": 0.4769,
+      "EMERGENCY": 0.0538
+    },
+    "refrigerant": {
+      "LOW": 1.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "restroom_fixture": {
+      "LOW": 1.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "restroom_supplies": {
+      "LOW": 1.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "roof_leak": {
+      "LOW": 0.0134,
+      "MEDIUM": 0.9866,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "signage_fencing": {
+      "LOW": 1.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "slip_trip": {
+      "LOW": 0.6568,
+      "MEDIUM": 0.3432,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    },
+    "structural": {
+      "LOW": 0.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.8571,
+      "EMERGENCY": 0.1429
+    },
+    "suspicious_person": {
+      "LOW": 0.0033,
+      "MEDIUM": 0.6349,
+      "HIGH": 0.3454,
+      "EMERGENCY": 0.0164
+    },
+    "unauthorized_access": {
+      "LOW": 0.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.8732,
+      "EMERGENCY": 0.1268
+    },
+    "waste_odor": {
+      "LOW": 1.0,
+      "MEDIUM": 0.0,
+      "HIGH": 0.0,
+      "EMERGENCY": 0.0
+    }
+  },
+  "n_per_subcategory": {
+    "access_control": 297,
+    "active_threat": 274,
+    "air_quality": 314,
+    "appliance_kitchen": 268,
+    "auto_door": 274,
+    "carpet_floor": 274,
+    "controls_bms": 264,
+    "door_mechanical": 287,
+    "drainage_backup": 276,
+    "entrapment": 270,
+    "fire_smoke": 275,
+    "gas_chemical": 251,
+    "glass_damage": 257,
+    "infestation": 279,
+    "landscaping": 268,
+    "lighting": 276,
+    "low_voltage_data": 268,
+    "malfunction": 316,
+    "minor_issue": 267,
+    "no_cooling": 258,
+    "no_heating": 306,
+    "panel_hazard": 290,
+    "parking_lighting": 281,
+    "pavement_damage": 284,
+    "pipe_leak": 261,
+    "power_outage": 260,
+    "refrigerant": 282,
+    "restroom_fixture": 278,
+    "restroom_supplies": 261,
+    "roof_leak": 299,
+    "signage_fencing": 263,
+    "slip_trip": 271,
+    "structural": 280,
+    "suspicious_person": 304,
+    "unauthorized_access": 276,
+    "waste_odor": 291
+  }
+}

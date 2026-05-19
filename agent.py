@@ -10,7 +10,6 @@ LangGraph pipeline adapted from Week5 mvp.py:
   → validator_gate → [override] → trainer_log → END
 """
 import json
-import os
 import re
 import time
 import warnings
@@ -283,11 +282,29 @@ TAXONOMY (category: subcategory — description):
 
 RISK LEVELS (about 55% of calls are LOW — use LOW as the default unless clearly worse):
 - LOW: routine maintenance, NO safety or operational impact. Can wait until next business day.
-  Typical: burnt-out bulb, empty soap/supplies, cosmetic damage, carpet stain, slow elevator doors, landscaping, minor door issue (still functions), appliance not working, pest sighting, signage damage, pothole, clogged sink (no overflow), single flickering light, thermostat slightly off, non-hazardous odor, badge reader glitch, minor water drip (contained), cleaning odor, trash not collected, network/data cable issue, minor plumbing drip, broken fridge.
+  Typical: clogged sink (caller reports as routine), slow drain or stopped drain with NO overflow mentioned even if caller says "full", wet floor or trip hazard where caller has already deployed a cone / mopped / blocked the area (hazard mitigated), single suite's AC or heat not working in mild weather with calm caller, badge reader glitch or door latch issue where caller has an alternative entry or workaround, single visible leak / wet spot in one location with NO spreading language, burnt-out bulb, empty soap/supplies, cosmetic damage, carpet stain, slow elevator doors, landscaping, minor door issue (still functions), appliance not working, pest sighting, signage damage, pothole, single flickering light, thermostat slightly off, minor water drip (contained), trash not collected, network/data cable issue, minor plumbing drip, broken fridge.
   Key: if nobody is in danger and operations continue, it's LOW.
-- MEDIUM: localized issue affecting one tenant or area, needs same-day attention, NOT a safety hazard.
-  Typical: one tenant's AC completely out, restroom with active overflow, water stain slowly spreading, door won't latch in occupied suite, toilet overflowing, access control to semi-restricted area, pipe leak that is spreading but contained to one area.
+  DEFAULT-TO-LOW HEURISTIC: Before picking MEDIUM or higher, run three checks:
+    1. Is anyone in physical danger right now? (No → not HIGH or EMERGENCY)
+    2. Will operations be visibly disrupted overnight if this waits until tomorrow morning? (No → LOW, not MEDIUM)
+    3. Has the caller already mitigated the immediate hazard (cone deployed, power off, area isolated, alternative entry)? (Yes → drop one band)
+  If all three favor LOW, use LOW even if a MEDIUM example seems to match the surface words.
+- MEDIUM: localized issue affecting one tenant or area, needs same-day attention, NOT a safety hazard. Requires ACTIVE, ongoing impact in this very moment, not just potential for impact.
+  Typical (every example has a qualifier — find the qualifier in the transcript before classifying as MEDIUM):
+    - one tenant's AC out AND it's a hot day OR caller mentions medical/sensitive context (medical equipment, server room, distressed person)
+    - restroom with water actively pooling on the floor (NOT just slow drain or "full" sink)
+    - water stain visibly spreading on a wall or ceiling RIGHT NOW
+    - door physically broken AND caller cannot secure their suite (no workaround)
+    - toilet currently overflowing onto floor (NOT just clogged)
+    - access control failure on a RESTRICTED area (server room, executive floor, secured stairwell)
+    - pipe leak the caller describes with words like "spreading", "getting worse", "more water now"
   Key: affects comfort or function for a specific area but NOT safety. Most pipe leaks, power issues affecting a single suite, and broken fixtures are MEDIUM at most.
+  DO NOT classify as MEDIUM merely because:
+    - A caller called the line. Callers report routine issues all the time — they don't have to be MEDIUM.
+    - A function is degraded but stable. Broken latch with workaround, slow drain without overflow, AC slightly off — these are LOW.
+    - The issue could become worse if ignored. POTENTIAL impact is not ACTIVE impact. A "leaky-looking" wall is LOW until water is spreading.
+    - The transcript mentions a part is "broken" or "not working". Many broken things wait until next business day without harm.
+    - It "feels like it should be MEDIUM." Trust the LOW default unless the call has SPECIFIC active-impact language.
 - HIGH: meaningful safety, operational, or financial risk affecting multiple tenants or the whole building.
   Typical: power out on ENTIRE floor or building, unauthorized person in RESTRICTED area, sparking electrical panel, elevator stuck WITH A PERSON INSIDE (responsive), broken security door to server room, major water leak spreading to multiple floors.
   Key: must affect safety OR multiple tenants/floors. A single-suite power outage is MEDIUM, not HIGH.
@@ -295,10 +312,12 @@ RISK LEVELS (about 55% of calls are LOW — use LOW as the default unless clearl
   Typical: confirmed gas leak (rotten egg smell), visible flames, person physically trapped and unresponsive, active armed threat, structural collapse.
   Key: someone could die or be seriously injured RIGHT NOW.
 
+SCOPE TEST: For MEDIUM, find the specific noun in the transcript that names the IMPACT (water on floor / hot day / sensitive context / restricted area / spreading). If you cannot quote that noun verbatim from the transcript, the call is LOW.
+
 ─── OVER-ESCALATION RULES (critical — violating these incurs a penalty) ───
 These situations are NOT emergencies. Do NOT classify them as fire_smoke, gas_chemical, entrapment, active_threat, or structural:
 • Burnt food smell (popcorn, toast, microwave) without visible fire → air_quality or waste_odor, LOW
-• Cleaning-product / floor-wax / new-filter fumes → air_quality, LOW
+• Cleaning-product / floor-wax / new-filter fumes → air_quality, MEDIUM
 • Spoiled food odor → waste_odor, LOW
 • Elevator out of service with doors open OR person already exited → malfunction or minor_issue, LOW/MEDIUM
 • Upset visitor who left or was escorted out peacefully → suspicious_person, MEDIUM
@@ -576,6 +595,7 @@ def build_enriched_query(state: WorkflowState):
 
 def make_retrieve(vector_store: Chroma):
     def retrieve(state: WorkflowState):
+        """Retrieve necessary historical data based on enriched query"""
         query = state["enriched_query"]
         docs = vector_store.similarity_search(query, k=5)
         retrieved_docs = []
@@ -601,6 +621,7 @@ def make_retrieve(vector_store: Chroma):
 
 def make_classify_issue(llm: ChatOpenAI):
     def classify_issue(state: WorkflowState):
+        """Classify issue based on caller profile and the context of the problem that has been parsed"""
         ent = state.get("entity") or {}
         profile = state.get("caller_profile")
 
@@ -646,23 +667,53 @@ def make_classify_issue(llm: ChatOpenAI):
 
 
 def consensus_check(state: WorkflowState):
+    """Two-axis sanity check against the 5 retrieved historical tickets:
+
+    1. Subcategory vote (legacy): if RAG majority disagrees with LLM subcategory,
+       weaken confidence by 30%. Does NOT change the label.
+    2. Risk-level vote (Strategy 1): demote-only band correction. If RAG majority
+       (>=60%) names a band BELOW the LLM's emission, demote to that band. Uses
+       per-call historical evidence rather than the aggregate subcategory cap.
+
+    Demote-only by construction — RAG can never promote past the LLM's emission.
+    """
     docs = state.get("retrieved_docs") or []
     classification = state["classification"]
     if not docs:
         return {"classification": classification, "consensus_agreement": None}
 
+    # ── Vote 1: subcategory consensus (existing behavior) ──
     sub_votes = Counter(d["metadata"].get("final_subcategory", "") for d in docs)
     majority_sub, majority_count = sub_votes.most_common(1)[0]
-    agreement = majority_count / len(docs) if docs else 0
-
-    if agreement >= 0.6 and majority_sub != classification.get("subcategory"):
+    sub_agreement = majority_count / len(docs)
+    if sub_agreement >= 0.6 and majority_sub != classification.get("subcategory"):
         conf = classification.get("confidence", 0.5)
         classification["confidence"] = conf * 0.7
         classification["consensus_note"] = (
-            f"RAG majority ({agreement:.0%}) suggests {majority_sub}"
+            f"RAG majority ({sub_agreement:.0%}) suggests {majority_sub}"
         )
 
-    return {"classification": classification, "consensus_agreement": agreement}
+    # ── Vote 2: risk-level consensus (Strategy 1, demote-only) ──
+    band_ord = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "EMERGENCY": 3}
+    band_votes = Counter()
+    for d in docs:
+        band = (d["metadata"].get("final_risk_level") or "").upper()
+        if band in band_ord:
+            band_votes[band] += 1
+    if band_votes:
+        majority_band, band_count = band_votes.most_common(1)[0]
+        band_agreement = band_count / sum(band_votes.values())
+        llm_band = (classification.get("risk_level") or "MEDIUM").upper()
+        if (band_agreement >= 0.6
+                and band_ord.get(majority_band, 3) < band_ord.get(llm_band, 1)):
+            classification["original_risk_level_rag"] = llm_band
+            classification["risk_level"] = majority_band
+            classification["consensus_band_applied"] = (
+                f"RAG-band majority ({band_agreement:.0%}={majority_band}) "
+                f"demoted from {llm_band}"
+            )
+
+    return {"classification": classification, "consensus_agreement": sub_agreement}
 
 
 def over_escalation_guard(state: WorkflowState):
@@ -678,6 +729,7 @@ def over_escalation_guard(state: WorkflowState):
             if exclude and any(kw in transcript_lower for kw in exclude):
                 continue
             if any(kw in transcript_lower for kw in trap["keywords"]):
+                # Correct any findings of previously defined keywords by capping their risk level ensuring they don't call 911
                 correction = trap["correction"]
                 classification["subcategory"] = correction["subcategory"]
                 classification["category"] = correction["category"]
@@ -711,6 +763,35 @@ def over_escalation_guard(state: WorkflowState):
             classification["dispatched_emergency_services"] = False
 
     return {"classification": classification}
+
+
+def make_risk_policy_cap(policy: dict):
+    """Per-subcategory historical band cap (demote-only).
+
+    Each subcategory has a "max plausible band" derived from the empirical
+    distribution of final_risk_level in historical_records.json. When the LLM
+    emits a band that exceeds the cap, demote to the cap. LLM under-estimates
+    pass through unchanged.
+    """
+    caps = policy["caps"]
+    band_ord = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "EMERGENCY": 3}
+
+    def risk_policy_cap(state: WorkflowState):
+        classification = state["classification"]
+        sub = (classification.get("subcategory") or "").lower()
+        cap = caps.get(sub, "EMERGENCY")
+        llm = (classification.get("risk_level") or "MEDIUM").upper()
+
+        if band_ord.get(llm, 1) > band_ord.get(cap, 3):
+            classification["original_risk_level"] = llm
+            classification["risk_level"] = cap
+            classification["risk_policy_applied"] = (
+                f"capped {llm}→{cap} (P[≥{llm}] < {policy.get('threshold_pct', 5)}% for {sub})"
+            )
+
+        return {"classification": classification}
+
+    return risk_policy_cap
 
 
 def compute_risk_score(state: WorkflowState):
@@ -811,6 +892,7 @@ def resolve_location(state: WorkflowState):
 
 
 def dispatch_vendor(state: WorkflowState):
+    """Dispatching a task to the correct vendor"""
     classification = state["classification"]
     subcategory = (classification.get("subcategory") or "").lower()
 
@@ -927,6 +1009,10 @@ def make_trainer_log(state: WorkflowState):
         "needs_human_review": needs_human,
         "needs_clarification": needs_clarification,
         "dispatched_emergency_services": emergency,
+        "original_risk_level": classification.get("original_risk_level"),
+        "risk_policy_applied": classification.get("risk_policy_applied"),
+        "original_risk_level_rag": classification.get("original_risk_level_rag"),
+        "consensus_band_applied": classification.get("consensus_band_applied"),
     }
 
     human_override = None
@@ -987,6 +1073,8 @@ def _build_graph(eval_mode: bool = True):
         persist_directory=CHROMA_DIR,
     )
 
+    risk_policy = json.loads((HERE / "models" / "risk_policy.json").read_text())
+
     workflow = StateGraph(WorkflowState)
 
     # Add nodes (extract+quality merged, grade/rewrite removed for speed)
@@ -997,6 +1085,7 @@ def _build_graph(eval_mode: bool = True):
     workflow.add_node("classify_issue", timed_node("classify_issue", make_classify_issue(llm)))
     workflow.add_node("consensus_check", timed_node("consensus_check", consensus_check))
     workflow.add_node("over_escalation_guard", timed_node("over_escalation_guard", over_escalation_guard))
+    workflow.add_node("risk_policy_cap", timed_node("risk_policy_cap", make_risk_policy_cap(risk_policy)))
     workflow.add_node("compute_risk_score", timed_node("compute_risk_score", compute_risk_score))
     workflow.add_node("resolve_location", timed_node("resolve_location", resolve_location))
     workflow.add_node("dispatch_vendor", timed_node("dispatch_vendor", dispatch_vendor))
@@ -1012,7 +1101,8 @@ def _build_graph(eval_mode: bool = True):
     workflow.add_edge("retrieve", "classify_issue")
     workflow.add_edge("classify_issue", "consensus_check")
     workflow.add_edge("consensus_check", "over_escalation_guard")
-    workflow.add_edge("over_escalation_guard", "compute_risk_score")
+    workflow.add_edge("over_escalation_guard", "risk_policy_cap")
+    workflow.add_edge("risk_policy_cap", "compute_risk_score")
     workflow.add_edge("compute_risk_score", "resolve_location")
     workflow.add_edge("resolve_location", "dispatch_vendor")
     workflow.add_edge("dispatch_vendor", "validator_gate")
