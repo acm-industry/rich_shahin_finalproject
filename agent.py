@@ -14,9 +14,10 @@ import re
 import time
 import warnings
 from collections import Counter
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Literal, Optional, TypedDict
+from typing import Annotated, Literal, Optional, Tuple, TypedDict
 
 from dotenv import load_dotenv
 
@@ -199,6 +200,144 @@ def print_timing_report():
     total_all = sum(sum(t) for t in _node_timings.values())
     print(f"  {'TOTAL':<30} {total_all:.2f}s")
     print(f"{'='*60}")
+
+
+# ── Clarification-signal gate ────────────────────────────────────────────────
+
+SPARSE_FIRST_TURN_WORDS = 6
+SPARSE_TOTAL_WORDS = 35
+
+SUBCATEGORY_SURFACE_FORMS = {
+    sub: [sub.replace("_", " ")] for sub in SUBCATEGORY_TO_CATEGORY
+}
+
+_GENERIC_OPENING_RX = re.compile(
+    r"(?:there'?s an?|i mean,?|you know,?)?\s*(?:issue|problem)\s+with\s+("
+    + "|".join(
+        re.escape(s)
+        for forms in SUBCATEGORY_SURFACE_FORMS.values()
+        for s in forms
+    )
+    + r")",
+    re.IGNORECASE,
+)
+_FLOOR_NUM_RX = re.compile(r"\bfloor\s+(\d+)\b", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class ClarificationDecision:
+    needs_clarification: bool
+    question: Optional[str]
+    reasons: Tuple[str, ...]
+
+
+def _sparse_caller(turns: list[dict]) -> Optional[Tuple[int, int]]:
+    caller = [t.get("text", "") for t in turns if t.get("speaker") == "caller"]
+    if not caller:
+        return None
+    first = len(caller[0].split())
+    total = sum(len(t.split()) for t in caller)
+    if first <= SPARSE_FIRST_TURN_WORDS and total <= SPARSE_TOTAL_WORDS:
+        return (first, total)
+    return None
+
+
+def _generic_opening(turns: list[dict]) -> Optional[str]:
+    first = next(
+        (t.get("text", "") for t in turns if t.get("speaker") == "caller"), ""
+    )
+    m = _GENERIC_OPENING_RX.search(first.lower())
+    return m.group(1) if m else None
+
+
+def _floor_self_correction(turns: list[dict]) -> Optional[Tuple[int, int]]:
+    seen: list[int] = []
+    for t in turns:
+        if t.get("speaker") != "caller":
+            continue
+        for n in _FLOOR_NUM_RX.findall(t.get("text", "")):
+            i = int(n)
+            if i not in seen:
+                seen.append(i)
+    return (seen[0], seen[1]) if len(seen) >= 2 else None
+
+
+def _floor_exceeds_building(
+    building: Optional[dict], extracted_floor: Optional[str]
+) -> Optional[Tuple[int, int]]:
+    if not building or not extracted_floor:
+        return None
+    m = re.search(r"\d+", extracted_floor)
+    if not m:
+        return None
+    claimed = int(m.group())
+    cap = building.get("floor_count", 999)
+    return (claimed, cap) if claimed > cap else None
+
+
+def _build_question(
+    *,
+    floor_correction: Optional[Tuple[int, int]],
+    floor_exceeds: Optional[Tuple[int, int]],
+    sparse: Optional[Tuple[int, int]],
+    generic: Optional[str],
+) -> str:
+    if floor_correction:
+        f1, f2 = floor_correction
+        return f"Just to confirm — is the issue on Floor {f1} or Floor {f2}?"
+    if floor_exceeds:
+        _, cap = floor_exceeds
+        return f"The building only has {cap} floors — which floor are you on?"
+    if sparse or generic:
+        return (
+            "Could you tell me a bit more about what's going wrong — for example, "
+            "what specifically isn't working and how long it's been like that?"
+        )
+    return "Could you describe the issue in a bit more detail so I can route it correctly?"
+
+
+def decide_clarification(
+    turns: list[dict],
+    building: Optional[dict],
+    extracted_floor: Optional[str],
+) -> ClarificationDecision:
+    reasons: list[str] = []
+
+    sparse = _sparse_caller(turns)
+    generic = _generic_opening(turns)
+    floor_correction = _floor_self_correction(turns)
+    floor_exceeds = _floor_exceeds_building(building, extracted_floor)
+
+    if sparse:
+        reasons.append(f"sparse_caller:first{sparse[0]}_total{sparse[1]}")
+    if generic:
+        reasons.append(f"taxonomy_echo:{generic.replace(' ', '_')}")
+    if floor_correction:
+        reasons.append(
+            f"floor_self_correction:{floor_correction[0]}_then_{floor_correction[1]}"
+        )
+    if floor_exceeds:
+        reasons.append(
+            f"floor_exceeds_building:claimed_{floor_exceeds[0]}_max_{floor_exceeds[1]}"
+        )
+
+    needs = bool(reasons)
+    question = (
+        _build_question(
+            floor_correction=floor_correction,
+            floor_exceeds=floor_exceeds,
+            sparse=sparse,
+            generic=generic,
+        )
+        if needs
+        else None
+    )
+
+    return ClarificationDecision(
+        needs_clarification=needs,
+        question=question,
+        reasons=tuple(reasons),
+    )
 
 
 # ── Prompts ─────────────────────────────────────────────────────────────────
@@ -477,6 +616,7 @@ GENUINE_EMERGENCY_SUBCATEGORIES = {"gas_chemical", "fire_smoke", "entrapment", "
 
 class WorkflowState(TypedDict):
     transcript: str
+    turns_split: list[dict]
     caller_phone: Optional[str]
     caller_profile: Optional[dict]
     eval_mode: bool
@@ -484,6 +624,8 @@ class WorkflowState(TypedDict):
     follow_ups: list
     extraction_complete: bool
     needs_clarification: bool
+    clarification_question: Optional[str]
+    clarification_reasons: Tuple[str, ...]
     enriched_query: str
     retrieved_docs: list
     retrieved_context: str
@@ -576,6 +718,29 @@ def gather_followup(state: WorkflowState):
         "transcript": new_transcript,
         "follow_ups": state["follow_ups"][1:],
         "extraction_complete": False,
+    }
+
+
+def clarification_gate(state: WorkflowState):
+    """Deterministic clarification-signal gate. ORs into the LLM's flag."""
+    entity = state.get("entity") or {}
+    building = _match_building(entity.get("building_name"))
+    if not building and state.get("caller_profile"):
+        building = _building_by_id.get(
+            state["caller_profile"].get("primary_building_id")
+        )
+
+    decision = decide_clarification(
+        state.get("turns_split") or [],
+        building,
+        _normalize_floor(entity.get("floor")),
+    )
+
+    existing = state.get("needs_clarification", False)
+    return {
+        "needs_clarification": existing or decision.needs_clarification,
+        "clarification_question": decision.question,
+        "clarification_reasons": decision.reasons,
     }
 
 
@@ -1013,6 +1178,7 @@ def make_trainer_log(state: WorkflowState):
         "risk_policy_applied": classification.get("risk_policy_applied"),
         "original_risk_level_rag": classification.get("original_risk_level_rag"),
         "consensus_band_applied": classification.get("consensus_band_applied"),
+        "clarification_reasons": list(state.get("clarification_reasons") or ()),
     }
 
     human_override = None
@@ -1042,14 +1208,14 @@ def make_trainer_log(state: WorkflowState):
 # ── Conditional edge functions ──────────────────────────────────────────────
 
 
-def needs_followup(state: WorkflowState) -> Literal["gather_followup", "build_enriched_query"]:
+def needs_followup(state: WorkflowState) -> Literal["gather_followup", "clarification_gate"]:
     if state.get("eval_mode"):
-        return "build_enriched_query"
+        return "clarification_gate"
     if state.get("extraction_complete"):
-        return "build_enriched_query"
+        return "clarification_gate"
     if state.get("follow_ups"):
         return "gather_followup"
-    return "build_enriched_query"
+    return "clarification_gate"
 
 
 
@@ -1080,6 +1246,7 @@ def _build_graph(eval_mode: bool = True):
     # Add nodes (extract+quality merged, grade/rewrite removed for speed)
     workflow.add_node("extract_and_check", timed_node("extract_and_check", make_extract_and_check(llm_mini)))
     workflow.add_node("gather_followup", gather_followup)
+    workflow.add_node("clarification_gate", timed_node("clarification_gate", clarification_gate))
     workflow.add_node("build_enriched_query", timed_node("build_enriched_query", build_enriched_query))
     workflow.add_node("retrieve", timed_node("retrieve", make_retrieve(vector_store)))
     workflow.add_node("classify_issue", timed_node("classify_issue", make_classify_issue(llm)))
@@ -1097,6 +1264,7 @@ def _build_graph(eval_mode: bool = True):
     workflow.add_edge(START, "extract_and_check")
     workflow.add_conditional_edges("extract_and_check", needs_followup)
     workflow.add_edge("gather_followup", "extract_and_check")
+    workflow.add_edge("clarification_gate", "build_enriched_query")
     workflow.add_edge("build_enriched_query", "retrieve")
     workflow.add_edge("retrieve", "classify_issue")
     workflow.add_edge("classify_issue", "consensus_check")
@@ -1132,6 +1300,7 @@ def classify(turns: list[dict], caller_phone: str | None = None) -> dict:
 
     result = graph.invoke({
         "transcript": transcript,
+        "turns_split": turns,
         "caller_phone": caller_phone,
         "caller_profile": profile,
         "eval_mode": True,
@@ -1139,6 +1308,8 @@ def classify(turns: list[dict], caller_phone: str | None = None) -> dict:
         "follow_ups": [],
         "extraction_complete": False,
         "needs_clarification": False,
+        "clarification_question": None,
+        "clarification_reasons": (),
         "enriched_query": "",
         "retrieved_docs": [],
         "retrieved_context": "",
