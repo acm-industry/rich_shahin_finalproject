@@ -482,6 +482,59 @@ TRUE when:
 3. Location information is conflicting or missing (caller mentions one building but profile says another, or no location at all)
 FALSE for most calls (~84% don't need it). Only flag when the missing info would materially change dispatch.
 
+─── CLARIFICATION REVIEW ───
+Gate decided needs_clarification={gate_verdict} based on signals: {clarification_reasons}.
+
+Context — what this flag means in practice:
+  needs_clarification=True routes the call to a human dispatcher for ONE more confirming question
+  before the case is closed. It does NOT block classification, dispatch, or vendor selection. It is
+  cheap insurance for cases where we want a human to double-check before final action.
+
+Why the gate fires `sparse_caller`: the caller's total speech across all turns was unusually short
+  (under ~35 words). Brief calls on safety-sensitive symptoms still need human verification even
+  when the symptom name sounds clear — operators have learned that short calls on rare-but-severe
+  events (gas, structural, threats) frequently turn out to need follow-up.
+
+Why the gate fires `taxonomy_echo`: the caller's first utterance literally repeated a taxonomy
+  label (e.g. "issue with no heating") rather than describing a symptom. This is a strong tell
+  that an operator had to draw the subcategory out of them, which usually means more info is needed.
+
+Why the gate fires `floor_self_correction`: the caller named two different floor numbers across
+  their turns. Strong tell that location is ambiguous.
+
+Why the gate fires `floor_exceeds_building`: the extracted floor is numerically higher than the
+  building's floor_count. Sometimes a true location conflict, sometimes a false alarm from a suite
+  number being parsed as a floor.
+
+Default: confirm the gate's verdict. Only flip when one of these clearly applies.
+
+Flip True → False ONLY if BOTH:
+  (a) The call is plainly routine maintenance — restroom supplies, light flicker, broken latch,
+      sign damage, slow drain, pothole, carpet stain, minor elevator noise, dripping water with
+      no urgency, interior door issues, broken appliance, pest sighting, signage damage.
+  (b) NO caller turn contains a safety-sensitive word: fire, smoke, gas, eggs, sulfur, chemical,
+      solvent, weapon, threat, sparks, structural, ceiling, falling, hazard, evacuation, trapped,
+      loitering, unauthorized, emergency, injured, electrical burning, panel.
+
+Calibration examples (sparse_caller TRUE → False, correct flip):
+  - "Restroom out of TP. Women's room on three. Pacific Ridge, Floor 3." → routine supply.
+  - "Door won't latch, interior door to the suite. Westpark, Floor 2." → routine mechanical.
+  - "Sign is propped up but could fall, not blocking anything." → routine signage.
+  - "Elevator doing something weird, sounds awful, been like this two days." → minor_issue.
+  - "Something dripping from up top, been pouring for an hour." → roof_leak, no urgency words.
+
+Calibration examples (sparse_caller TRUE → KEEP True, do NOT flip):
+  - "Ceiling piece fell. Area's clear." → "ceiling", "fell" are safety words → KEEP.
+  - "Smell something weird. Rotten eggs." → gas signal → KEEP.
+  - "Lights are off. Emergency lights came on." → "emergency" word + safety implication → KEEP.
+  - "Someone loitering outside, still there by the elevators." → security word → KEEP.
+
+Flip False → True only when:
+  - The caller named a safety-sensitive symptom AND the gate failed to flag it (gate missed).
+  - The named floor exceeds the building's floor count, or two contradictory floors appear.
+
+When uncertain, keep the gate's verdict.
+
 ─── EMERGENCY SERVICES (dispatched_emergency_services) ───
 TRUE ONLY for: confirmed visible fire, confirmed hazardous gas leak, person physically trapped and unable to exit, active threat involving violence or weapons.
 FALSE for ALL other cases — especially burnt-food smells, cleaning fumes, empty/open elevator, upset visitors, water damage.
@@ -611,6 +664,22 @@ TRAP_PATTERNS = [
 
 GENUINE_EMERGENCY_SUBCATEGORIES = {"gas_chemical", "fire_smoke", "entrapment", "active_threat", "structural"}
 
+
+def _compile_kw_regex(keywords):
+    """Word-boundary, case-insensitive, longest-first regex over a keyword list."""
+    parts = [re.escape(kw) for kw in sorted(keywords, key=len, reverse=True)]
+    return re.compile(r"(?:\b|^)(?:" + "|".join(parts) + r")(?:\b|$)", re.IGNORECASE)
+
+
+for _trap in TRAP_PATTERNS:
+    _trap["_kw_re"] = _compile_kw_regex(_trap["keywords"])
+    if _trap.get("exclude_keywords"):
+        _trap["_exc_re"] = _compile_kw_regex(_trap["exclude_keywords"])
+
+_DANGER_WORDS_RE = _compile_kw_regex(
+    ["fire", "gas", "trapped", "threat", "chemical", "collapse", "smoke", "entrapment"]
+)
+
 # ── Graph state ─────────────────────────────────────────────────────────────
 
 
@@ -624,6 +693,7 @@ class WorkflowState(TypedDict):
     follow_ups: list
     extraction_complete: bool
     needs_clarification: bool
+    gate_clarification_verdict: bool
     clarification_question: Optional[str]
     clarification_reasons: Tuple[str, ...]
     enriched_query: str
@@ -722,7 +792,12 @@ def gather_followup(state: WorkflowState):
 
 
 def clarification_gate(state: WorkflowState):
-    """Deterministic clarification-signal gate. ORs into the LLM's flag."""
+    """Deterministic clarification-signal gate.
+
+    Writes its verdict to state.gate_clarification_verdict (reviewable by
+    classify_issue) — does NOT touch state.needs_clarification, so the
+    downstream LLM can flip the decision in either direction.
+    """
     entity = state.get("entity") or {}
     building = _match_building(entity.get("building_name"))
     if not building and state.get("caller_profile"):
@@ -736,9 +811,8 @@ def clarification_gate(state: WorkflowState):
         _normalize_floor(entity.get("floor")),
     )
 
-    existing = state.get("needs_clarification", False)
     return {
-        "needs_clarification": existing or decision.needs_clarification,
+        "gate_clarification_verdict": decision.needs_clarification,
         "clarification_question": decision.question,
         "clarification_reasons": decision.reasons,
     }
@@ -811,6 +885,9 @@ def make_classify_issue(llm: ChatOpenAI):
             f"Summary: {ent.get('summary', '')}"
         )
 
+        reasons = list(state.get("clarification_reasons") or ())
+        gate_verdict = state.get("gate_clarification_verdict", False)
+
         prompt = CLASSIFY_PROMPT.format(
             taxonomy=_TAXONOMY_BLOCK,
             buildings=_BUILDINGS_BLOCK,
@@ -818,6 +895,8 @@ def make_classify_issue(llm: ChatOpenAI):
             entities=entities_str,
             transcript=state["transcript"],
             profile_context=profile_context,
+            gate_verdict=gate_verdict,
+            clarification_reasons=reasons,
         )
 
         response = llm.invoke(
@@ -858,42 +937,46 @@ def consensus_check(state: WorkflowState):
             f"RAG majority ({sub_agreement:.0%}) suggests {majority_sub}"
         )
 
-    # ── Vote 2: risk-level consensus (Strategy 1, demote-only) ──
+    # ── Vote 2: risk-level consensus (demote-only, same-sub filter) ──
     band_ord = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "EMERGENCY": 3}
-    band_votes = Counter()
-    for d in docs:
-        band = (d["metadata"].get("final_risk_level") or "").upper()
-        if band in band_ord:
-            band_votes[band] += 1
-    if band_votes:
-        majority_band, band_count = band_votes.most_common(1)[0]
-        band_agreement = band_count / sum(band_votes.values())
-        llm_band = (classification.get("risk_level") or "MEDIUM").upper()
-        if (band_agreement >= 0.6
-                and band_ord.get(majority_band, 3) < band_ord.get(llm_band, 1)):
-            classification["original_risk_level_rag"] = llm_band
-            classification["risk_level"] = majority_band
-            classification["consensus_band_applied"] = (
-                f"RAG-band majority ({band_agreement:.0%}={majority_band}) "
-                f"demoted from {llm_band}"
-            )
+    sub = (classification.get("subcategory") or "").lower()
+    same_sub_docs = [
+        d for d in docs
+        if (d["metadata"].get("final_subcategory") or "").lower() == sub
+    ]
+    if len(same_sub_docs) >= 3:
+        band_votes = Counter()
+        for d in same_sub_docs:
+            band = (d["metadata"].get("final_risk_level") or "").upper()
+            if band in band_ord:
+                band_votes[band] += 1
+        if band_votes:
+            majority_band, band_count = band_votes.most_common(1)[0]
+            band_agreement = band_count / sum(band_votes.values())
+            llm_band = (classification.get("risk_level") or "MEDIUM").upper()
+            if (band_agreement >= 0.6
+                    and band_ord.get(majority_band, 3) < band_ord.get(llm_band, 1)):
+                classification["original_risk_level_rag"] = llm_band
+                classification["risk_level"] = majority_band
+                classification["consensus_band_applied"] = (
+                    f"RAG-band majority ({band_agreement:.0%}={majority_band}, "
+                    f"n={len(same_sub_docs)} same-sub) demoted from {llm_band}"
+                )
 
     return {"classification": classification, "consensus_agreement": sub_agreement}
 
 
 def over_escalation_guard(state: WorkflowState):
     classification = state["classification"]
-    transcript_lower = state["transcript"].lower()
+    transcript = state["transcript"]
     subcategory = (classification.get("subcategory") or "").lower()
-    original_subcategory = subcategory
 
     for trap in TRAP_PATTERNS:
         if subcategory == trap["dangerous"]:
             # Check exclude keywords first — if any match, skip this trap
-            exclude = trap.get("exclude_keywords", [])
-            if exclude and any(kw in transcript_lower for kw in exclude):
+            if trap.get("_exc_re") and trap["_exc_re"].search(transcript):
                 continue
-            if any(kw in transcript_lower for kw in trap["keywords"]):
+            if trap["_kw_re"].search(transcript):
                 # Correct any findings of previously defined keywords by capping their risk level ensuring they don't call 911
                 correction = trap["correction"]
                 classification["subcategory"] = correction["subcategory"]
@@ -913,8 +996,7 @@ def over_escalation_guard(state: WorkflowState):
 
     # If LLM initially classified as dangerous but its own output is benign,
     # flag for human review (covers cases the guard didn't catch)
-    danger_words = ["fire", "gas", "trapped", "threat", "chemical", "collapse", "smoke", "entrapment"]
-    if any(w in transcript_lower for w in danger_words):
+    if _DANGER_WORDS_RE.search(transcript):
         final_sub = (classification.get("subcategory") or "").lower()
         if final_sub not in GENUINE_EMERGENCY_SUBCATEGORIES:
             classification["needs_human_review"] = True
@@ -1308,6 +1390,7 @@ def classify(turns: list[dict], caller_phone: str | None = None) -> dict:
         "follow_ups": [],
         "extraction_complete": False,
         "needs_clarification": False,
+        "gate_clarification_verdict": False,
         "clarification_question": None,
         "clarification_reasons": (),
         "enriched_query": "",
