@@ -1376,6 +1376,7 @@ def make_trainer_log(state: WorkflowState):
         "risk_score": state.get("risk_score"),
         "risk_details": state.get("risk_details"),
         "clarification_reasons": list(state.get("clarification_reasons") or ()),
+        "confidence": classification.get("confidence"),
     }
 
     human_override = None
