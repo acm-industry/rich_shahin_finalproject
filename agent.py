@@ -627,6 +627,31 @@ SEVERITY_WEIGHTS = {
     "Low": 0.15,
 }
 
+# Band-name → severity weight (mirrors SEVERITY_WEIGHTS but keyed on risk_level strings).
+RISK_LEVEL_SEVERITY = {
+    "LOW": 0.15,
+    "MEDIUM": 0.4,
+    "HIGH": 0.75,
+    "EMERGENCY": 1.0,
+}
+
+# Multiplier on Cost(error) by building_type — captures that a leak in a hospital
+# is costlier-to-misclassify than the same leak in a parking garage. Hand-coded
+# (no ML); range [0.7, 1.3] gets normalized to [0, 1] in the Cost formula.
+BUILDING_TYPE_COST_MODIFIER = {
+    "medical": 1.3,
+    "hospital": 1.3,
+    "industrial": 1.2,
+    "warehouse": 1.1,
+    "office": 1.0,
+    "retail_office": 1.0,
+    "parking": 0.7,
+}
+
+# HITL trigger threshold for the Risk = P(error) × Cost(error) score. Additive
+# only — never overrides an existing False from upstream triggers.
+RISK_HITL_THRESHOLD = 0.30
+
 # Over-escalation trap patterns: (dangerous_subcategory, trigger_keywords) → safe correction
 TRAP_PATTERNS = [
     {
@@ -797,6 +822,11 @@ def clarification_gate(state: WorkflowState):
     Writes its verdict to state.gate_clarification_verdict (reviewable by
     classify_issue) — does NOT touch state.needs_clarification, so the
     downstream LLM can flip the decision in either direction.
+
+    In interactive mode the question is also appended to state.follow_ups so
+    the downstream gather_followup node actually asks it. In eval mode the
+    needs_followup conditional skips the gather loop, so the appended question
+    is a no-op there.
     """
     entity = state.get("entity") or {}
     building = _match_building(entity.get("building_name"))
@@ -811,10 +841,15 @@ def clarification_gate(state: WorkflowState):
         _normalize_floor(entity.get("floor")),
     )
 
+    existing_follow_ups = list(state.get("follow_ups") or [])
+    if decision.question and decision.question not in existing_follow_ups:
+        existing_follow_ups.append(decision.question)
+
     return {
         "gate_clarification_verdict": decision.needs_clarification,
         "clarification_question": decision.question,
         "clarification_reasons": decision.reasons,
+        "follow_ups": existing_follow_ups,
     }
 
 
@@ -1041,57 +1076,135 @@ def make_risk_policy_cap(policy: dict):
     return risk_policy_cap
 
 
-def compute_risk_score(state: WorkflowState):
-    classification = state["classification"]
-    entity = state.get("entity") or {}
+def make_compute_risk_score(policy: dict):
+    """Risk = P(error) × Cost(error) HITL trigger (Design B, additive).
 
-    severity = entity.get("severity", "Medium")
-    severity_str = severity.split(".")[-1] if "." in str(severity) else str(severity)
-    severity_weight = SEVERITY_WEIGHTS.get(severity_str, 0.4)
+    P(error) is a weighted blend of three deterministic signals:
+      - 0.40 × (1 - llm_confidence)           [LLM's own uncertainty]
+      - 0.30 × rag_disagreement_strength      [bands the RAG-consensus demoted by]
+      - 0.30 × historical_mismatch_rate[sub]  [P(intake_band != final_band) per sub]
 
-    confidence = classification.get("confidence", 0.5)
-    urgency_count = len(entity.get("urgency_indicators", []))
-    urgency_factor = min(1.0, 0.3 + (urgency_count * 0.15))
+    Cost(error) is a weighted blend of three deterministic factors:
+      - 0.50 × severity_weight[risk_level]                       [band severity]
+      - 0.30 × subcategory_cost_factor[sub]                      [historical $ cost]
+      - 0.20 × normalized_building_modifier[building_type]       [criticality]
 
-    risk = (
-        severity_weight * 0.40
-        + (1 - confidence) * 0.35
-        + urgency_factor * 0.25
-    )
-    risk = round(min(1.0, max(0.0, risk)), 4)
+    Both clamped to [0, 1]. Risk = P × C. Trigger needs_human_review when
+    Risk >= RISK_HITL_THRESHOLD, ADDITIVELY (never overrides existing False).
+    All existing hard rules preserved (band HIGH/EMERGENCY → review,
+    confidence<0.6 → review).
+    """
+    mismatch_rates = policy.get("intake_vs_final_mismatch_rate", {})
+    cost_factors = policy.get("subcategory_cost_factor", {})
+    band_ord = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "EMERGENCY": 3}
 
-    risk_level = (classification.get("risk_level") or "MEDIUM").upper()
-    needs_human = bool(classification.get("needs_human_review", False))
-    needs_clarification = state.get("needs_clarification", False) or bool(
-        classification.get("needs_clarification", False)
-    )
+    # Normalize the BUILDING_TYPE_COST_MODIFIER constants to [0, 1] range.
+    # Min=0.7 (parking), Max=1.3 (medical). office (1.0) lands at 0.5.
+    _bm_min = min(BUILDING_TYPE_COST_MODIFIER.values())
+    _bm_max = max(BUILDING_TYPE_COST_MODIFIER.values())
+    _bm_range = _bm_max - _bm_min if _bm_max > _bm_min else 1.0
 
-    # Deterministic overrides
-    if risk_level in ("HIGH", "EMERGENCY"):
-        needs_human = True
-    if confidence < 0.6:
-        needs_human = True
+    def compute_risk_score(state: WorkflowState):
+        classification = state["classification"]
 
-    reason_parts = []
-    if severity_str == "Critical":
-        reason_parts.append("Critical severity")
-    if confidence < 0.7:
-        reason_parts.append(f"low confidence ({confidence:.2f})")
-    if urgency_count >= 3:
-        reason_parts.append(f"high urgency ({urgency_count} indicators)")
+        # ── P(error) components ──
+        confidence = classification.get("confidence", 0.5)
+        try:
+            confidence = float(confidence)
+        except (TypeError, ValueError):
+            confidence = 0.5
+        confidence_uncertainty = max(0.0, min(1.0, 1.0 - confidence))
 
-    return {
-        "risk_score": risk,
-        "risk_details": {
-            "severity_weight": severity_weight,
-            "confidence": confidence,
-            "urgency_count": urgency_count,
-            "urgency_factor": urgency_factor,
-            "reason": " and ".join(reason_parts) if reason_parts else "within normal parameters",
-        },
-        "needs_human_review": needs_human,
-        "needs_clarification": needs_clarification,
-    }
+        # RAG-band disagreement strength = bands the consensus demoted by.
+        # consensus_check sets original_risk_level_rag only when it demoted.
+        rag_disagreement = 0.0
+        original_rag = classification.get("original_risk_level_rag")
+        if original_rag:
+            current_band = (classification.get("risk_level") or "MEDIUM").upper()
+            diff = band_ord.get(original_rag.upper(), 1) - band_ord.get(current_band, 1)
+            rag_disagreement = min(1.0, max(0.0, diff / 3.0))
+
+        subcat = (classification.get("subcategory") or "").lower()
+        historical_mismatch = mismatch_rates.get(subcat, 0.0)
+
+        #get P(error) from weighted signals
+        p_error = (
+            0.40 * confidence_uncertainty +
+            0.30 * rag_disagreement +
+            0.30 * historical_mismatch
+        )
+        p_error = round(min(1.0, max(0.0, p_error)), 4)
+
+        # ── Cost(error) components ──
+        risk_level = (classification.get("risk_level") or "MEDIUM").upper()
+        severity_weight = RISK_LEVEL_SEVERITY.get(risk_level, 0.4)
+
+        sub_cost = cost_factors.get(subcat, 0.5)
+
+        building_type = (state.get("_building_type") or "").lower()
+        bm_raw = BUILDING_TYPE_COST_MODIFIER.get(building_type, 1.0)
+        building_modifier_norm = (bm_raw - _bm_min) / _bm_range  # [0, 1]
+
+        cost_error = (
+            0.50 * severity_weight +
+            0.30 * sub_cost +
+            0.20 * building_modifier_norm
+        )
+        cost_error = round(min(1.0, max(0.0, cost_error)), 4)
+
+        # ── Risk = P × C ──
+        risk = round(p_error * cost_error, 4)
+
+        # ── Preserve existing HITL behavior ──
+        needs_human = bool(classification.get("needs_human_review", False))
+        needs_clarification = state.get("needs_clarification", False) or bool(
+            classification.get("needs_clarification", False)
+        )
+
+        # Hard rules (kept as-is — additive with the new Risk trigger):
+        if risk_level in ("HIGH", "EMERGENCY"):
+            needs_human = True
+        if confidence < 0.6:
+            needs_human = True
+
+        # NEW: Risk-based additive trigger.
+        if risk >= RISK_HITL_THRESHOLD:
+            needs_human = True
+
+        # Build a compact reason string for trainer-log auditability.
+        reason_parts = []
+        if risk >= RISK_HITL_THRESHOLD:
+            reason_parts.append(
+                f"Risk={risk:.2f} (P_err={p_error:.2f} × Cost={cost_error:.2f})"
+            )
+        if risk_level in ("HIGH", "EMERGENCY"):
+            reason_parts.append(f"band={risk_level}")
+        if confidence < 0.6:
+            reason_parts.append(f"low conf {confidence:.2f}")
+
+        return {
+            "risk_score": risk,
+            "risk_details": {
+                "p_error": p_error,
+                "cost_error": cost_error,
+                "p_error_components": {
+                    "confidence_uncertainty": round(confidence_uncertainty, 4),
+                    "rag_disagreement": round(rag_disagreement, 4),
+                    "historical_mismatch": round(historical_mismatch, 4),
+                },
+                "cost_error_components": {
+                    "severity_weight": severity_weight,
+                    "sub_cost_factor": sub_cost,
+                    "building_modifier_norm": round(building_modifier_norm, 4),
+                },
+                "threshold": RISK_HITL_THRESHOLD,
+                "reason": " | ".join(reason_parts) if reason_parts else "within normal parameters",
+            },
+            "needs_human_review": needs_human,
+            "needs_clarification": needs_clarification,
+        }
+
+    return compute_risk_score
 
 
 def resolve_location(state: WorkflowState):
@@ -1260,6 +1373,8 @@ def make_trainer_log(state: WorkflowState):
         "risk_policy_applied": classification.get("risk_policy_applied"),
         "original_risk_level_rag": classification.get("original_risk_level_rag"),
         "consensus_band_applied": classification.get("consensus_band_applied"),
+        "risk_score": state.get("risk_score"),
+        "risk_details": state.get("risk_details"),
         "clarification_reasons": list(state.get("clarification_reasons") or ()),
     }
 
@@ -1290,14 +1405,20 @@ def make_trainer_log(state: WorkflowState):
 # ── Conditional edge functions ──────────────────────────────────────────────
 
 
-def needs_followup(state: WorkflowState) -> Literal["gather_followup", "clarification_gate"]:
+def needs_followup(state: WorkflowState) -> Literal["gather_followup", "build_enriched_query"]:
+    """Fired AFTER clarification_gate. In interactive mode, route to gather_followup
+    when any pending follow_ups exist (either from extract_and_check's LLM extractor
+    or from the clarification_gate's appended question). In eval mode, skip directly
+    to build_enriched_query — the gate's verdict still drives the needs_clarification
+    flag via the LLM review in classify_issue.
+    """
     if state.get("eval_mode"):
-        return "clarification_gate"
+        return "build_enriched_query"
     if state.get("extraction_complete"):
-        return "clarification_gate"
+        return "build_enriched_query"
     if state.get("follow_ups"):
         return "gather_followup"
-    return "clarification_gate"
+    return "build_enriched_query"
 
 
 
@@ -1335,7 +1456,7 @@ def _build_graph(eval_mode: bool = True):
     workflow.add_node("consensus_check", timed_node("consensus_check", consensus_check))
     workflow.add_node("over_escalation_guard", timed_node("over_escalation_guard", over_escalation_guard))
     workflow.add_node("risk_policy_cap", timed_node("risk_policy_cap", make_risk_policy_cap(risk_policy)))
-    workflow.add_node("compute_risk_score", timed_node("compute_risk_score", compute_risk_score))
+    workflow.add_node("compute_risk_score", timed_node("compute_risk_score", make_compute_risk_score(risk_policy)))
     workflow.add_node("resolve_location", timed_node("resolve_location", resolve_location))
     workflow.add_node("dispatch_vendor", timed_node("dispatch_vendor", dispatch_vendor))
     workflow.add_node("validator_gate", timed_node("validator_gate", validator_gate))
@@ -1343,10 +1464,13 @@ def _build_graph(eval_mode: bool = True):
     workflow.add_node("trainer_log", timed_node("trainer_log", make_trainer_log))
 
     # Edges
+    # Flow: extract_and_check → clarification_gate → (gather_followup loop OR build_enriched_query)
+    # Running clarification_gate BEFORE the gather conditional means its appended
+    # question is available to gather_followup in interactive mode.
     workflow.add_edge(START, "extract_and_check")
-    workflow.add_conditional_edges("extract_and_check", needs_followup)
+    workflow.add_edge("extract_and_check", "clarification_gate")
+    workflow.add_conditional_edges("clarification_gate", needs_followup)
     workflow.add_edge("gather_followup", "extract_and_check")
-    workflow.add_edge("clarification_gate", "build_enriched_query")
     workflow.add_edge("build_enriched_query", "retrieve")
     workflow.add_edge("retrieve", "classify_issue")
     workflow.add_edge("classify_issue", "consensus_check")

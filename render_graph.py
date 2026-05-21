@@ -2,15 +2,15 @@
 Render the compiled agent graph to a Mermaid PNG + source file.
 
 Usage:
-    python visualize_graph.py
+    python render_graph.py
 
 Outputs:
-    docs/agent_graph.png   — rendered topology (via mermaid.ink, needs internet)
-    docs/agent_graph.mmd   — Mermaid source (offline-editable, embeddable in design doc)
+    graph_visual/agent_graph.png   — rendered topology (via mermaid.ink, needs internet)
+    graph_visual/agent_graph.mmd   — Mermaid source (offline-editable)
 
 The OPENAI_API_KEY env var is set to a dummy value if missing — graph compilation
-instantiates ChatOpenAI() at agent.py:1014, which validates the key is present but
-does NOT call the API. No tokens are consumed.
+instantiates ChatOpenAI() but does NOT call the API. No tokens are consumed.
+Re-run any time the graph structure changes to refresh the artifacts.
 """
 from __future__ import annotations
 
@@ -18,14 +18,15 @@ import os
 import sys
 from pathlib import Path
 
-os.environ.setdefault("OPENAI_API_KEY", "sk-visualize-only-no-llm-call-made")
+os.environ.setdefault("OPENAI_API_KEY", "sk-render-only-no-llm-call-made")
 
 from langchain_core.runnables.graph import MermaidDrawMethod
 
 import agent
 
+
 def main() -> int:
-    out_dir = Path(__file__).resolve().parent / "docs"
+    out_dir = Path(__file__).resolve().parent / "graph_visual"
     out_dir.mkdir(exist_ok=True)
 
     graph = agent._get_eval_graph().get_graph()

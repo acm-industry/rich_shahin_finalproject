@@ -38,21 +38,38 @@ def main(threshold_pct: float, force: bool) -> int:
     records = json.loads((OPS / "historical_records.json").read_text())
     print(f"Loaded {len(records)} historical tickets")
 
-    # Group final_risk_level by subcategory
-    by_sub: dict[str, Counter] = {}
+    # Group final_risk_level + intake/final band + cost by subcategory
+    by_sub: dict[str, dict] = {}
     for r in records:
         sub = (r.get("final_subcategory") or "").lower()
         band = (r.get("final_risk_level") or "").upper()
         if not sub or band not in BAND_ORD:
             continue
-        by_sub.setdefault(sub, Counter())[band] += 1
+        d = by_sub.setdefault(sub, {
+            "bands": Counter(),
+            "intake_pairs": [],
+            "costs": [],
+        })
+        d["bands"][band] += 1
+        intake = (r.get("intake_risk_level") or "").upper()
+        if intake in BAND_ORD:
+            d["intake_pairs"].append((intake, band))
+        parts = r.get("parts_cost_usd") or 0
+        labor = r.get("labor_cost_usd") or 0
+        cost = parts + labor
+        if cost > 0:
+            d["costs"].append(cost)
 
     caps: dict[str, str] = {}
     distribution: dict[str, dict[str, float]] = {}
     n_per_subcategory: dict[str, int] = {}
+    # For Risk = P(error) × Cost(error) — historical aggregations:
+    intake_vs_final_mismatch_rate: dict[str, float] = {}
+    mean_total_cost_usd: dict[str, float] = {}
     threshold = threshold_pct / 100.0
 
-    for sub, counts in sorted(by_sub.items()):
+    for sub, d in sorted(by_sub.items()):
+        counts = d["bands"]
         total = sum(counts.values())
         n_per_subcategory[sub] = total
         dist = {b: round(counts.get(b, 0) / total, 4) for b in BANDS}
@@ -65,21 +82,46 @@ def main(threshold_pct: float, force: bool) -> int:
                 cap = b
         caps[sub] = cap
 
+        # intake_vs_final mismatch — fraction of historical tickets whose intake
+        # band did NOT match the final band. Feeds the P(error) blend at inference.
+        pairs = d["intake_pairs"]
+        intake_vs_final_mismatch_rate[sub] = (
+            round(sum(1 for i, f in pairs if i != f) / len(pairs), 4)
+            if pairs else 0.0
+        )
+
+        # Mean dispatch cost — sum(parts_cost_usd + labor_cost_usd) averaged.
+        mean_total_cost_usd[sub] = (
+            round(sum(d["costs"]) / len(d["costs"]), 2) if d["costs"] else 0.0
+        )
+
+    # Normalize subcategory_cost_factor to [0, 1] across subcategories.
+    max_cost = max(mean_total_cost_usd.values()) if mean_total_cost_usd else 0.0
+    subcategory_cost_factor: dict[str, float] = (
+        {sub: round(c / max_cost, 4) for sub, c in mean_total_cost_usd.items()}
+        if max_cost > 0 else {sub: 0.0 for sub in mean_total_cost_usd}
+    )
+
     artifact = {
         "threshold_pct": threshold_pct,
         "caps": caps,
         "distribution": distribution,
         "n_per_subcategory": n_per_subcategory,
+        # New fields for Risk = P(error) × Cost(error):
+        "intake_vs_final_mismatch_rate": intake_vs_final_mismatch_rate,
+        "subcategory_cost_factor": subcategory_cost_factor,
+        "mean_total_cost_usd": mean_total_cost_usd,
     }
     ARTIFACT.write_text(json.dumps(artifact, indent=2))
     print(f"Wrote {ARTIFACT}")
 
-    print("\nCap table:")
-    print(f"  {'subcategory':<22} {'cap':<10} {'n':>6}  distribution (LOW / MED / HIGH / EMER)")
+    print("\nCap table + Risk = P(error) × Cost(error) inputs:")
+    print(f"  {'subcategory':<22} {'cap':<10} {'n':>5}  {'mismatch':>9}  {'cost_norm':>9}  {'mean_$':>8}")
     for sub in sorted(caps):
-        d = distribution[sub]
-        print(f"  {sub:<22} {caps[sub]:<10} {n_per_subcategory[sub]:>6}  "
-              f"{d['LOW']:.2f} / {d['MEDIUM']:.2f} / {d['HIGH']:.2f} / {d['EMERGENCY']:.2f}")
+        print(f"  {sub:<22} {caps[sub]:<10} {n_per_subcategory[sub]:>5}  "
+              f"{intake_vs_final_mismatch_rate[sub]:>9.3f}  "
+              f"{subcategory_cost_factor[sub]:>9.3f}  "
+              f"${mean_total_cost_usd[sub]:>7.0f}")
     return 0
 
 

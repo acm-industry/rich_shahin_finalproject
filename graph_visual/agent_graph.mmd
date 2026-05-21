@@ -1,0 +1,44 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	extract_and_check(extract_and_check)
+	gather_followup(gather_followup)
+	clarification_gate(clarification_gate)
+	build_enriched_query(build_enriched_query)
+	retrieve(retrieve)
+	classify_issue(classify_issue)
+	consensus_check(consensus_check)
+	over_escalation_guard(over_escalation_guard)
+	risk_policy_cap(risk_policy_cap)
+	compute_risk_score(compute_risk_score)
+	resolve_location(resolve_location)
+	dispatch_vendor(dispatch_vendor)
+	validator_gate(validator_gate)
+	override(override)
+	trainer_log(trainer_log)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> extract_and_check;
+	build_enriched_query --> retrieve;
+	clarification_gate -.-> build_enriched_query;
+	clarification_gate -.-> gather_followup;
+	classify_issue --> consensus_check;
+	compute_risk_score --> resolve_location;
+	consensus_check --> over_escalation_guard;
+	dispatch_vendor --> validator_gate;
+	extract_and_check --> clarification_gate;
+	gather_followup --> extract_and_check;
+	over_escalation_guard --> risk_policy_cap;
+	override --> trainer_log;
+	resolve_location --> dispatch_vendor;
+	retrieve --> classify_issue;
+	risk_policy_cap --> compute_risk_score;
+	validator_gate -.-> override;
+	validator_gate -.-> trainer_log;
+	trainer_log --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
