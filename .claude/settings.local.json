@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 evaluation/run_eval.py:*)",
+      "Bash(python3 evaluation/scoring.py:*)",
+      "Bash(python3 build_chroma.py:*)",
+      "Bash(python3 fit_risk_policy.py:*)",
+      "Bash(python3 -c:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(ls:*)",
+      "Bash(grep:*)",
+      "Bash(tail:*)",
+      "Bash(head:*)",
+      "Bash(cat:*)",
+      "Bash(ps:*)",
+      "Bash(date)",
+      "Bash(wc:*)",
+      "Bash(find:*)"
+    ]
+  }
+}

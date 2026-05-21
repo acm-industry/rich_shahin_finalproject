@@ -10,6 +10,7 @@ LangGraph pipeline adapted from Week5 mvp.py:
   → validator_gate → [override] → trainer_log → END
 """
 import json
+import os
 import re
 import time
 import warnings
@@ -37,7 +38,7 @@ warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
 
 HERE = Path(__file__).resolve().parent
 OPS = HERE / "operational"
-CHROMA_DIR = str(HERE / "chroma_db")
+CHROMA_DIR = os.environ.get("CHROMA_DIR_OVERRIDE", str(HERE / "chroma_db"))
 
 _buildings = json.loads((OPS / "buildings.json").read_text())
 _vendors = json.loads((OPS / "vendors.json").read_text())
@@ -321,7 +322,12 @@ def decide_clarification(
             f"floor_exceeds_building:claimed_{floor_exceeds[0]}_max_{floor_exceeds[1]}"
         )
 
-    needs = bool(reasons)
+    # Option A: sparse_caller alone is too noisy (24% precision on dev).
+    # Only let it contribute when paired with a higher-precision signal.
+    signal_types = {r.split(":")[0] for r in reasons}
+    strong = signal_types & {"taxonomy_echo", "floor_self_correction", "floor_exceeds_building"}
+    needs = bool(strong)
+
     question = (
         _build_question(
             floor_correction=floor_correction,
@@ -688,6 +694,13 @@ TRAP_PATTERNS = [
 ]
 
 GENUINE_EMERGENCY_SUBCATEGORIES = {"gas_chemical", "fire_smoke", "entrapment", "active_threat", "structural"}
+
+# Optional: append candidate traps from a JSON file at startup. Used by
+# mine_trap_patterns.py to run shadow evals without editing source.
+_TRAPS_OVERRIDE = os.environ.get("TRAP_PATTERNS_OVERRIDE")
+if _TRAPS_OVERRIDE:
+    _extra = json.loads(Path(_TRAPS_OVERRIDE).read_text())
+    TRAP_PATTERNS.extend(_extra)
 
 
 def _compile_kw_regex(keywords):

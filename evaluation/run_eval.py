@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
 import sys
 import time
 import traceback
@@ -120,7 +121,18 @@ def main():
                     help=f"Per-call timeout in seconds (default {DEFAULT_TIMEOUT_S:.0f}). "
                          "Calls exceeding this are recorded as missing predictions.")
     ap.add_argument("--verbose", "-v", action="store_true")
+    ap.add_argument("--chroma", default=None,
+                    help="Override CHROMA_DIR — sets CHROMA_DIR_OVERRIDE env var "
+                         "before importing the agent. Used for shadow-corpus evals.")
+    ap.add_argument("--traps", default=None,
+                    help="Override TRAP_PATTERNS — sets TRAP_PATTERNS_OVERRIDE env "
+                         "var with a JSON file path. Loaded by agent at import time.")
     args = ap.parse_args()
+
+    if args.chroma:
+        os.environ["CHROMA_DIR_OVERRIDE"] = str(Path(args.chroma).resolve())
+    if args.traps:
+        os.environ["TRAP_PATTERNS_OVERRIDE"] = str(Path(args.traps).resolve())
 
     agent = load_agent(args.agent)
     eval_rows = json.loads(Path(args.eval).read_text())

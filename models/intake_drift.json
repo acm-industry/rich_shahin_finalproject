@@ -1,0 +1,42 @@
+{
+  "fire_smoke": [
+    {
+      "to": "waste_odor",
+      "rate": 0.087,
+      "n": 29
+    },
+    {
+      "to": "panel_hazard",
+      "rate": 0.057,
+      "n": 19
+    }
+  ],
+  "structural": [
+    {
+      "to": "roof_leak",
+      "rate": 0.11,
+      "n": 35
+    }
+  ],
+  "gas_chemical": [
+    {
+      "to": "air_quality",
+      "rate": 0.152,
+      "n": 46
+    }
+  ],
+  "active_threat": [
+    {
+      "to": "suspicious_person",
+      "rate": 0.095,
+      "n": 28
+    }
+  ],
+  "entrapment": [
+    {
+      "to": "malfunction",
+      "rate": 0.096,
+      "n": 28
+    }
+  ]
+}
