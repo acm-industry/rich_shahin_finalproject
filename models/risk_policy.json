@@ -1,5 +1,5 @@
 {
-  "threshold_pct": 5.0,
+  "threshold_pct": 3.0,
   "caps": {
     "access_control": "MEDIUM",
     "active_threat": "EMERGENCY",

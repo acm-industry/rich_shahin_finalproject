@@ -3,11 +3,12 @@ Build the per-subcategory historical band-cap table.
 
 For each of the 36 subcategories, compute the empirical distribution of
 `final_risk_level` over historical tickets. The cap is the *highest* band
-where empirical probability >= --threshold-pct (default 5%). At inference,
+where empirical probability >= --threshold-pct (default 3%). At inference,
 the LLM's emitted band is demoted to the cap when it exceeds it.
 
 Output:
     models/risk_policy.json   — caps + full distribution + n_per_subcategory
+                                + intake_vs_final_mismatch_rate + subcategory_cost_factor
 
 Re-run:
     python fit_risk_policy.py            # skips if artifact exists
@@ -107,7 +108,7 @@ def main(threshold_pct: float, force: bool) -> int:
         "caps": caps,
         "distribution": distribution,
         "n_per_subcategory": n_per_subcategory,
-        # New fields for Risk = P(error) × Cost(error):
+        # Fields used by the Risk = P(error) × Cost(error) trigger:
         "intake_vs_final_mismatch_rate": intake_vs_final_mismatch_rate,
         "subcategory_cost_factor": subcategory_cost_factor,
         "mean_total_cost_usd": mean_total_cost_usd,
@@ -127,8 +128,8 @@ def main(threshold_pct: float, force: bool) -> int:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--threshold-pct", type=float, default=5.0,
-                    help="Minimum %% empirical mass for a band to be allowed (default: 5.0)")
+    ap.add_argument("--threshold-pct", type=float, default=3.0,
+                    help="Minimum %% empirical mass for a band to be allowed (default: 3.0)")
     ap.add_argument("--force", action="store_true",
                     help="Regenerate even if the artifact already exists.")
     args = ap.parse_args()
