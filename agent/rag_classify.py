@@ -3,8 +3,9 @@ RAG + LLM classification nodes.
 
 Maps to the brief's deliverables on:
   - **RAG strategy** — build_enriched_query forms a structured query from the
-    extractor's output; make_retrieve hits Chroma for the 5 most-similar
-    historical tickets (k=5).
+    extractor's output; make_retrieve hits Chroma for k=10 candidates and
+    runs them through make_rerank_docs (deterministic metadata-aware
+    reranker) to produce the top-5 reranked set used downstream.
   - **Hierarchical classification (10×36)** — make_classify_issue is the
     main gpt-4.1 call, sees the full taxonomy + retrieved historical context +
     extracted entities + transcript + caller profile + clarification-gate
@@ -19,10 +20,12 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from typing import Optional
 
 from langchain_chroma import Chroma
 from langchain_openai import ChatOpenAI
 
+from .config import _building_by_name
 from .prompts import CLASSIFY_PROMPT, _BUILDINGS_BLOCK, _TAXONOMY_BLOCK
 from .state import WorkflowState
 
@@ -42,28 +45,164 @@ def build_enriched_query(state: WorkflowState):
     }
 
 
-def make_retrieve(vector_store: Chroma):
-    """Chroma similarity search node: pulls the 5 most-similar historical
-    tickets (page_content + metadata including final_subcategory and
-    final_risk_level) so downstream LLM and consensus_check can use them.
+# ── RAG reranking ────────────────────────────────────────────────────────────
+#
+# Chroma's similarity_search picks the k most-embedding-similar docs against
+# the enriched_query. That signal is fine but ignores the structured metadata
+# we have at retrieval time — the caller's profile, the extracted entity, the
+# doc's building/city/risk_level metadata. The reranker layers a small
+# composite boost on top of Chroma's rank to re-order the k=10 candidates,
+# then returns the top 5 for downstream nodes.
+
+# Extractor's Severity enum → final_risk_level band, for the severity-class
+# match boost. The extractor emits Severity strings ("Critical"/...) while
+# the historical docs store final_risk_level ("EMERGENCY"/...).
+_SEVERITY_TO_BAND = {
+    "Critical": "EMERGENCY",
+    "High": "HIGH",
+    "Medium": "MEDIUM",
+    "Low": "LOW",
+}
+
+# Additive boost weights. Base score is rank-derived in [0, 1]; boosts stack.
+# Weights tuned so the most-specific signal (exact building_name match)
+# dominates, with progressively smaller boosts for coarser signals.
+_DEFAULT_RERANK_WEIGHTS = {
+    "building_name": 0.50,   # exact building match — strongest signal
+    "building_type": 0.20,   # same building category (medical, industrial, ...)
+    "severity_class": 0.10,  # extractor's severity matches doc's risk band
+    "city": 0.05,            # same city — weakest, local-context only
+}
+
+
+def _building_type_for(building_name: Optional[str]) -> Optional[str]:
+    """Look up a building's type via the registry. Returns None if no match."""
+    if not building_name:
+        return None
+    record = _building_by_name.get(building_name.strip().lower())
+    return record.get("building_type") if record else None
+
+
+def _score_doc(
+    doc: dict,
+    rank: int,
+    total: int,
+    entity: dict,
+    profile: Optional[dict],
+    weights: dict,
+) -> float:
+    """Composite rerank score for one Chroma-retrieved doc.
+
+    Base = (total - rank) / total — Chroma's best-ranked candidate starts at
+    1.0, worst at 1/total. Boosts add on top when the doc's metadata matches
+    the caller's emerging context. Final score is unbounded above but
+    relative-ordering is what matters for sort.
     """
+    meta = doc["metadata"]
+    base = (total - rank) / total if total else 0.0
+    score = base
+
+    # 1. Building-name match — strongest signal (exact-same-building case).
+    extracted_bname = (entity.get("building_name") or "").strip().lower()
+    doc_bname = (meta.get("building_name") or "").strip().lower()
+    if extracted_bname and doc_bname and extracted_bname == doc_bname:
+        score += weights["building_name"]
+
+    # 2. Building-type match — needs a registry lookup since Chroma metadata
+    #    doesn't carry building_type directly. Caller's type comes from the
+    #    profile when available, else looked up via the extracted name.
+    caller_btype: Optional[str] = None
+    if profile and profile.get("primary_building_type"):
+        caller_btype = profile["primary_building_type"].lower()
+    elif extracted_bname:
+        caller_btype = _building_type_for(extracted_bname)
+    doc_btype = _building_type_for(doc_bname) if doc_bname else None
+    if caller_btype and doc_btype and caller_btype == doc_btype:
+        score += weights["building_type"]
+
+    # 3. Severity-class match — extractor's severity vs doc's final_risk_level.
+    severity = entity.get("severity")
+    severity_band = _SEVERITY_TO_BAND.get(severity) if severity else None
+    doc_band = (meta.get("final_risk_level") or "").upper()
+    if severity_band and doc_band and severity_band == doc_band:
+        score += weights["severity_class"]
+
+    # 4. City match — weak local-context signal from the profile.
+    profile_city = (profile or {}).get("primary_city", "") if profile else ""
+    doc_city = meta.get("city", "")
+    if profile_city and doc_city and profile_city == doc_city:
+        score += weights["city"]
+
+    return score
+
+
+def make_rerank_docs(
+    *,
+    top_k: int = 5,
+    weights: Optional[dict] = None,
+):
+    """Factory for the metadata-aware reranker. Returns a callable taking
+    (docs, entity, profile) and returning the top-k reranked docs.
+
+    Mirrors `make_retrieve`'s factory pattern so a different rerank policy
+    (different weights, different top_k) can be swapped in without changing
+    the call sites in `make_retrieve` or downstream nodes.
+    """
+    final_weights = weights if weights is not None else _DEFAULT_RERANK_WEIGHTS
+
+    def rerank_docs(
+        docs: list[dict],
+        entity: dict,
+        profile: Optional[dict],
+    ) -> list[dict]:
+        total = len(docs)
+        if total == 0:
+            return []
+        scored = [
+            (_score_doc(d, i, total, entity, profile, final_weights), d)
+            for i, d in enumerate(docs)
+        ]
+        scored.sort(key=lambda x: -x[0])
+        return [d for _, d in scored[:top_k]]
+
+    return rerank_docs
+
+
+def make_retrieve(
+    vector_store: Chroma,
+    *,
+    over_retrieve_k: int = 10,
+    rerank_fn=None,
+):
+    """Chroma similarity search node with metadata-aware reranking.
+
+    Pulls `over_retrieve_k` candidates (default 10) from Chroma against the
+    enriched_query, runs them through `rerank_fn` (default: make_rerank_docs
+    with the standard weights), and writes the top 5 to retrieved_docs +
+    retrieved_context. Downstream nodes (classify_issue, consensus_check)
+    see only the reranked set.
+    """
+    if rerank_fn is None:
+        rerank_fn = make_rerank_docs()
 
     def retrieve(state: WorkflowState):
         query = state["enriched_query"]
-        docs = vector_store.similarity_search(query, k=5)
-        retrieved_docs = []
-        context_parts = []
-        for doc in docs:
-            meta = doc.metadata
-            retrieved_docs.append({
-                "content": doc.page_content,
-                "metadata": meta,
-            })
-            context_parts.append(
-                f"[Past ticket] {doc.page_content}"
-            )
+        entity = state.get("entity") or {}
+        profile = state.get("caller_profile")
+
+        # Over-retrieve from Chroma against the enriched query
+        raw_docs = vector_store.similarity_search(query, k=over_retrieve_k)
+        candidates = [
+            {"content": d.page_content, "metadata": d.metadata}
+            for d in raw_docs
+        ]
+
+        # Rerank the k=10 candidates → top 5 for downstream
+        reranked = rerank_fn(candidates, entity, profile)
+        context_parts = [f"[Past ticket] {d['content']}" for d in reranked]
+
         return {
-            "retrieved_docs": retrieved_docs,
+            "retrieved_docs": reranked,
             "retrieved_context": "\n\n".join(context_parts),
             "retrieval_attempts": state.get("retrieval_attempts", 0) + 1,
         }
