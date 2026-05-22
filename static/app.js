@@ -486,7 +486,9 @@ els.resetBtn.addEventListener("click", () => resetAll());
 els.ttsToggle.addEventListener("click", () => {
   state.ttsOn = !state.ttsOn;
   els.ttsToggle.setAttribute("aria-pressed", state.ttsOn ? "true" : "false");
-  els.ttsToggle.textContent = `TTS: ${state.ttsOn ? "on" : "off"}`;
+  els.ttsToggle.title = state.ttsOn ? "Mute agent voice" : "Unmute agent voice";
+  // Visual state is driven entirely by aria-pressed in style.css — don't
+  // overwrite the button's inner spans here.
   if (!state.ttsOn && state.currentAudio) {
     try { state.currentAudio.pause(); } catch (_) {}
     state.currentAudio = null;
@@ -536,3 +538,50 @@ if (!Scribe) {
   els.hint.textContent =
     "ElevenLabs client failed to load — you can still type below.";
 }
+
+// ── Cosmetic: iPhone-style statusbar clock + call timer ─────────────────
+// Purely visual — does not touch any agent state or backend calls.
+
+const sbClock = document.getElementById("sbClock");
+const callTimer = document.getElementById("callTimer");
+const phoneShell = document.querySelector(".phone");
+let timerStartedAt = 0;
+
+function tickClock() {
+  if (!sbClock) return;
+  const d = new Date();
+  let h = d.getHours();
+  const m = d.getMinutes().toString().padStart(2, "0");
+  if (h === 0) h = 12;
+  else if (h > 12) h -= 12;
+  sbClock.textContent = `${h}:${m}`;
+}
+tickClock();
+setInterval(tickClock, 15000);
+
+function fmtElapsed(ms) {
+  const total = Math.floor(ms / 1000);
+  const mm = Math.floor(total / 60).toString().padStart(2, "0");
+  const ss = (total % 60).toString().padStart(2, "0");
+  return `${mm}:${ss}`;
+}
+
+function tickTimer() {
+  // Reflect live mic state via a phone-shell data attribute so CSS can react
+  // (avatar pulse, etc.), AND drive the cosmetic call timer.
+  const live = state.listening || (state.scribe && !state.callClosed);
+  if (phoneShell) {
+    phoneShell.dataset.state = live ? "in-call" : (state.callClosed ? "ended" : "idle");
+  }
+  if (!callTimer) return;
+  if (live) {
+    if (!timerStartedAt) timerStartedAt = Date.now();
+    callTimer.hidden = false;
+    callTimer.textContent = fmtElapsed(Date.now() - timerStartedAt);
+  } else {
+    timerStartedAt = 0;
+    callTimer.hidden = true;
+    callTimer.textContent = "00:00";
+  }
+}
+setInterval(tickTimer, 1000);
