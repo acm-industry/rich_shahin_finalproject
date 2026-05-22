@@ -87,17 +87,8 @@ SUBCATEGORY_TO_VENDOR_TYPE = {
 
 # ── Risk-policy constants (Risk = P(error) × Cost(error) HITL trigger) ───────
 
-# Severity weights keyed on the Severity-enum string values (used by the
-# extractor's emitted severity).
-SEVERITY_WEIGHTS = {
-    "Critical": 1.0,
-    "High": 0.75,
-    "Medium": 0.4,
-    "Low": 0.15,
-}
-
-# Band-name → severity weight (mirrors SEVERITY_WEIGHTS, keyed on risk_level
-# strings — feeds Cost(error)'s severity term).
+# Band-name → severity weight, keyed on risk_level strings.
+# Feeds the severity term of Cost(error) in compute_risk_score.
 RISK_LEVEL_SEVERITY = {
     "LOW": 0.15,
     "MEDIUM": 0.4,

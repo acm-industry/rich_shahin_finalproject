@@ -8,17 +8,26 @@ The agent contract is untouched — this server builds the same
 by `classify()`. The only extra it exposes is `clarification_question`,
 which already lives in graph state but is dropped by `_format_prediction()`.
 
-Run:
-    python voice_server.py
+Run (from the repo root):
+    python web/voice_server.py
 Then open http://localhost:8000/ in Chrome or Edge.
 """
 from __future__ import annotations
 
 import json
 import os
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+# This script lives at web/voice_server.py; the `agent` package lives one
+# directory up at the repo root. When invoked as `python web/voice_server.py`,
+# Python only puts `web/` on sys.path, so the agent import would fail.
+# Prepend the repo root so the rest of the imports resolve regardless of CWD.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from elevenlabs import ElevenLabs
 from langchain_openai import ChatOpenAI
