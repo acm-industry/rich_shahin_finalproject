@@ -28,6 +28,16 @@ specific deliverable mapping:
 
 For graph visualization, see `render_graph.py` at the repo root.
 """
-from .graph import _build_graph, _get_eval_graph, classify
+from .graph import _build_graph, _format_prediction, _get_eval_graph, classify
+from .intake import make_extract_and_check
+from .utils import _flatten, _lookup_profile
 
-__all__ = ["classify", "_get_eval_graph", "_build_graph"]
+__all__ = [
+    "classify",
+    "_get_eval_graph",
+    "_build_graph",
+    "_flatten",
+    "_format_prediction",
+    "_lookup_profile",
+    "make_extract_and_check",
+]

@@ -1,8 +1,12 @@
-// Voice shell for CBRE dispatch agent.
-// Captures live conversation via Web Speech API, accumulates turns in the
-// canonical [{speaker, text}] shape, and hands them to the same classify()
-// the batch harness uses. TTS reads back the clarification question or
-// final dispatch summary.
+// Voice shell for the CBRE dispatch agent — ElevenLabs edition.
+//
+// STT: ElevenLabs Scribe v2 realtime, browser-side WebSocket via a single-use
+// token minted server-side. VAD auto-commits transcript segments on silence.
+// TTS: ElevenLabs Flash v2.5 streaming, fetched as MP3 from our /api/tts/stream
+// proxy and played through an <audio> element so the first byte plays in ~75ms.
+//
+// The classify pipeline (POST /api/classify) is unchanged; this file only owns
+// the audio layer.
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -23,20 +27,23 @@ const els = {
   sendBtn: $("sendBtn"),
 };
 
-const SpeechRecognitionImpl =
-  window.SpeechRecognition || window.webkitSpeechRecognition;
+const EL = window.ElevenLabsClient;
+const Scribe = EL && EL.Scribe;
+const RealtimeEvents = EL && EL.RealtimeEvents;
 
 const state = {
   turns: [],
-  recognition: null,
+  scribe: null,          // active Scribe connection (or null when idle)
+  scribeOpenedAt: 0,     // wall-clock ms when the current Scribe socket opened
+  consecutiveQuickCloses: 0, // reconnect-loop guard (resets on healthy open)
+  stopRequested: false,  // set true by intentional stops so CLOSE doesn't reconnect
+  keyterms: [],          // cached domain-bias list from /api/keyterms
   listening: false,
   ttsOn: true,
-  // Once we have a finalized classification (no more clarification needed)
-  // we stop auto-classifying so the user can review.
   callClosed: false,
-  // We block the mic while the backend is thinking or the agent is speaking.
-  busy: false,
-  pendingInterim: null,
+  busy: false,           // backend round-trip in flight
+  pendingInterim: "",    // last partial transcript fragment for live display
+  currentAudio: null,    // <audio> element for in-flight TTS (for barge-in)
 };
 
 // ── UI helpers ──────────────────────────────────────────────────────────────
@@ -60,18 +67,13 @@ function setBusy(busy) {
 }
 
 function renderTurns() {
-  // Re-render keeps DOM in sync with state.turns. Cheap enough for a demo.
-  els.transcript.innerHTML = "";
-  for (const t of state.turns) {
-    appendTurnNode(t.speaker, t.text, false);
-  }
-  if (state.pendingInterim) {
-    appendTurnNode("caller", state.pendingInterim, true);
-  }
+  els.transcript.replaceChildren();
+  for (const t of state.turns) els.transcript.appendChild(turnNode(t.speaker, t.text, false));
+  if (state.pendingInterim) els.transcript.appendChild(turnNode("caller", state.pendingInterim, true));
   els.transcript.scrollTop = els.transcript.scrollHeight;
 }
 
-function appendTurnNode(speaker, text, interim) {
+function turnNode(speaker, text, interim) {
   const div = document.createElement("div");
   div.className = `turn ${speaker}${interim ? " interim" : ""}`;
   const who = document.createElement("span");
@@ -81,271 +83,304 @@ function appendTurnNode(speaker, text, interim) {
   body.textContent = text;
   div.appendChild(who);
   div.appendChild(body);
-  els.transcript.appendChild(div);
+  return div;
 }
 
 function pushTurn(speaker, text) {
   const trimmed = (text || "").trim();
   if (!trimmed) return;
   state.turns.push({ speaker, text: trimmed });
-  state.pendingInterim = null;
+  state.pendingInterim = "";
   renderTurns();
+}
+
+function appendDtDd(parent, dtText, ddContent) {
+  const dt = document.createElement("dt");
+  dt.textContent = dtText;
+  const dd = document.createElement("dd");
+  if (ddContent instanceof Node) dd.appendChild(ddContent);
+  else dd.textContent = ddContent == null ? "—" : String(ddContent);
+  parent.appendChild(dt);
+  parent.appendChild(dd);
+}
+
+function riskPill(level) {
+  const span = document.createElement("span");
+  span.className = `pill ${(level || "medium").toLowerCase()}`;
+  span.textContent = level || "—";
+  return span;
 }
 
 function showResult(pred) {
   els.result.hidden = false;
-  const rows = [
-    ["Category", pred.category || "—"],
-    ["Subcategory", pred.subcategory || "—"],
-    [
-      "Risk",
-      `<span class="pill ${
-        (pred.risk_level || "medium").toLowerCase()
-      }">${pred.risk_level || "—"}</span>`,
-    ],
-    ["Building", pred.building_name || "—"],
-    ["Floor", pred.floor || "—"],
-    ["Address", pred.address || "—"],
-    ["Vendor", pred.dispatched_vendor_id || "—"],
-    [
-      "911 dispatched",
-      pred.dispatched_emergency_services ? "YES" : "no",
-    ],
-    [
-      "Needs human review",
-      pred.needs_human_review ? "yes" : "no",
-    ],
-    [
-      "Needs clarification",
-      pred.needs_clarification ? "yes" : "no",
-    ],
-  ];
-  els.resultBody.innerHTML = rows
-    .map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`)
-    .join("");
+  els.resultBody.replaceChildren();
+  appendDtDd(els.resultBody, "Category", pred.category);
+  appendDtDd(els.resultBody, "Subcategory", pred.subcategory);
+  appendDtDd(els.resultBody, "Risk", riskPill(pred.risk_level));
+  appendDtDd(els.resultBody, "Building", pred.building_name);
+  appendDtDd(els.resultBody, "Floor", pred.floor);
+  appendDtDd(els.resultBody, "Address", pred.address);
+  appendDtDd(els.resultBody, "Vendor", pred.dispatched_vendor_id);
+  appendDtDd(els.resultBody, "911 dispatched", pred.dispatched_emergency_services ? "YES" : "no");
+  appendDtDd(els.resultBody, "Needs human review", pred.needs_human_review ? "yes" : "no");
+  appendDtDd(els.resultBody, "Needs clarification", pred.needs_clarification ? "yes" : "no");
   els.summary.textContent = pred.call_summary || "";
 }
 
 function showCallerProfile(profile) {
   if (!profile) {
     els.callerInfo.hidden = true;
-    els.callerInfo.innerHTML = "";
+    els.callerInfo.replaceChildren();
     return;
   }
   els.callerInfo.hidden = false;
+  els.callerInfo.replaceChildren();
   const bldg = profile.primary_building_name || profile.primary_building_id || "—";
   const name = profile.caller_name || profile.name || "unnamed";
   const role = profile.contact_role || profile.role;
-  els.callerInfo.innerHTML =
-    `Known caller — <b>${name}</b>` +
-    (role ? `, ${role}` : "") +
-    ` · primary building <b>${bldg}</b>`;
+
+  els.callerInfo.appendChild(document.createTextNode("Known caller — "));
+  const nameEl = document.createElement("b");
+  nameEl.textContent = name;
+  els.callerInfo.appendChild(nameEl);
+  if (role) els.callerInfo.appendChild(document.createTextNode(`, ${role}`));
+  els.callerInfo.appendChild(document.createTextNode(" · primary building "));
+  const bldgEl = document.createElement("b");
+  bldgEl.textContent = bldg;
+  els.callerInfo.appendChild(bldgEl);
 }
 
-// ── Speech recognition (STT) ────────────────────────────────────────────────
+// ── ElevenLabs Scribe (STT) ─────────────────────────────────────────────────
 
-function buildRecognizer() {
-  if (!SpeechRecognitionImpl) return null;
-  const rec = new SpeechRecognitionImpl();
-  rec.lang = "en-US";
-  rec.continuous = false;
-  rec.interimResults = true;
-  rec.maxAlternatives = 1;
-
-  rec.onresult = (event) => {
-    let interim = "";
-    let final = "";
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const r = event.results[i];
-      if (r.isFinal) final += r[0].transcript;
-      else interim += r[0].transcript;
-    }
-    if (interim) {
-      state.pendingInterim = interim;
-      renderTurns();
-    }
-    if (final) {
-      pushTurn("caller", final);
-    }
-  };
-
-  rec.onerror = (event) => {
-    console.warn("speech error", event.error);
-    if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-      setStatus("mic blocked", "error");
-      setMicState(false);
-    } else if (event.error === "no-speech") {
-      // benign — onend will handle restart logic
-    } else {
-      setStatus(event.error, "error");
-    }
-  };
-
-  rec.onend = () => {
-    // Triggered after each utterance (since continuous=false). If we have a
-    // pending caller turn, classify; otherwise restart listening if still on.
-    if (state.callClosed) {
-      setMicState(false);
-      setStatus("call closed", "idle");
-      return;
-    }
-    const newCallerTurn = state.turns.length > 0 &&
-      state.turns[state.turns.length - 1].speaker === "caller";
-    if (newCallerTurn && !state.busy) {
-      classifyAndRespond();
-    } else if (state.listening && !state.busy) {
-      // user paused without saying anything — restart
-      safeStart();
-    }
-  };
-
-  return rec;
-}
-
-function safeStart() {
-  if (!state.recognition) return;
+async function fetchKeyterms() {
+  if (state.keyterms.length) return state.keyterms;
   try {
-    state.recognition.start();
+    const res = await fetch("/api/keyterms");
+    if (!res.ok) return [];
+    const data = await res.json();
+    state.keyterms = data.keyterms || [];
+  } catch (_) {
+    state.keyterms = [];
+  }
+  return state.keyterms;
+}
+
+async function mintScribeToken() {
+  const res = await fetch("/api/scribe-token");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || `token endpoint ${res.status}`);
+  }
+  const { token } = await res.json();
+  return token;
+}
+
+async function startScribe() {
+  if (!Scribe) throw new Error("ElevenLabs client failed to load");
+  const [token, allKeyterms] = await Promise.all([mintScribeToken(), fetchKeyterms()]);
+  // Cap at 25 to keep the upgrade URL under ~3 KB; 100 keyterms turned the URL
+  // into 5-10 KB and the server kept rejecting it with an immediate close.
+  const keyterms = allKeyterms.slice(0, 25);
+
+  console.log("[scribe] connecting", { keyterms: keyterms.length });
+  state.scribeOpenedAt = Date.now();
+  state.stopRequested = false; // fresh session — allow CLOSE-driven reconnects
+
+  const conn = Scribe.connect({
+    token,
+    modelId: "scribe_v2_realtime",
+    commitStrategy: "vad",
+    vadSilenceThresholdSecs: 1.2,
+    keyterms,
+    noVerbatim: true,
+    microphone: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+  });
+
+  // Subscribe to every diagnostic event so a real failure surfaces in console
+  // instead of being silently swallowed by the generic ERROR handler.
+  const noisyEvents = [
+    "AUTH_ERROR", "UNACCEPTED_TERMS", "QUOTA_EXCEEDED", "RATE_LIMITED",
+    "TRANSCRIBER_ERROR", "INPUT_ERROR", "RESOURCE_EXHAUSTED",
+    "INSUFFICIENT_AUDIO_ACTIVITY", "SESSION_TIME_LIMIT_EXCEEDED",
+    "COMMIT_THROTTLED", "QUEUE_OVERFLOW", "CHUNK_SIZE_EXCEEDED",
+    "SESSION_STARTED",
+  ];
+  for (const name of noisyEvents) {
+    const ev = RealtimeEvents[name];
+    if (ev !== undefined) {
+      conn.on(ev, (data) => console.log(`[scribe] ${name}`, data));
+    }
+  }
+
+  conn.on(RealtimeEvents.OPEN, () => {
+    console.log("[scribe] OPEN");
+    // NOTE: do NOT reset consecutiveQuickCloses here. With invalid options the
+    // server accepts the WS upgrade (firing OPEN) then closes 100-200ms later;
+    // a reset on OPEN would clear the counter on every cycle and the guard
+    // would never trip. The CLOSE handler resets it only when the connection
+    // survived past 3s — a true healthy-session signal.
     setStatus("listening", "listening");
-  } catch (e) {
-    // start() throws if recognition is already running — ignore
-  }
-}
+  });
+  conn.on(RealtimeEvents.PARTIAL_TRANSCRIPT, (data) => {
+    // Barge-in: caller speaking cancels in-flight TTS so the agent stops mid-word.
+    if (state.currentAudio && !state.currentAudio.paused) {
+      try { state.currentAudio.pause(); } catch (_) {}
+      state.currentAudio = null;
+    }
+    state.pendingInterim = data.text || "";
+    renderTurns();
+  });
+  conn.on(RealtimeEvents.COMMITTED_TRANSCRIPT, (data) => {
+    const text = (data.text || "").trim();
+    if (!text) return;
+    pushTurn("caller", text);
+    if (!state.busy) classifyAndRespond();
+  });
+  conn.on(RealtimeEvents.ERROR, (err) => {
+    console.warn("[scribe] ERROR", err);
+    setStatus("stt error", "error");
+  });
+  conn.on(RealtimeEvents.CLOSE, (info) => {
+    const liveMs = Date.now() - (state.scribeOpenedAt || Date.now());
+    console.log(`[scribe] CLOSE after ${liveMs}ms`, info);
+    // Intentional stop (Reset / Stop listening / end-of-call) — bail without
+    // reconnecting. Without this guard the auto-reconnect would re-open the
+    // mic the moment the user tries to stop.
+    if (state.stopRequested || !state.listening || state.callClosed) return;
 
-function startListening() {
-  if (!state.recognition) {
-    state.recognition = buildRecognizer();
-    if (!state.recognition) {
-      setStatus("STT unsupported", "error");
-      alert(
-        "Web Speech API not supported in this browser. Use Chrome or Edge."
-      );
+    // Reconnect loop guard: if the socket dies within 3s, count it as a quick
+    // failure. After 3 in a row, give up — something is broken (likely mic
+    // permission, server-side rejection, or a config mismatch) and reconnecting
+    // forever just makes the UI flap.
+    if (liveMs < 3000) {
+      state.consecutiveQuickCloses = (state.consecutiveQuickCloses || 0) + 1;
+    } else {
+      state.consecutiveQuickCloses = 0;
+    }
+    if (state.consecutiveQuickCloses >= 3) {
+      console.error("[scribe] giving up — 3 consecutive quick closes. " +
+        "Open devtools network tab + check the [scribe] log lines above.");
+      setStatus("stt offline", "error");
+      setMicState(false);
+      state.scribe = null;
       return;
     }
-  }
 
-  // Open with an agent greeting on the very first turn so the loop feels
-  // like a real call. Skip if the user already has turns (resumed).
-  if (state.turns.length === 0) {
-    const greeting = "CBRE maintenance, what's going on?";
-    pushTurn("agent", greeting);
-    speak(greeting, () => {
-      setMicState(true);
-      safeStart();
-    });
-    return;
-  }
+    setStatus("reconnecting", "thinking");
+    setTimeout(() => state.listening && reconnectScribe(), 800);
+  });
 
-  setMicState(true);
-  safeStart();
+  return conn;
 }
 
-function stopListening() {
-  setMicState(false);
-  setStatus("idle", "idle");
+async function reconnectScribe() {
   try {
-    state.recognition && state.recognition.stop();
+    await stopScribe(false);
+    state.scribe = await startScribe();
   } catch (e) {
-    /* ignore */
+    console.error("reconnect failed", e);
+    setStatus("stt offline", "error");
+    setMicState(false);
   }
 }
 
-// ── TTS ─────────────────────────────────────────────────────────────────────
-
-// Voices load asynchronously in some browsers. Resolve the best available
-// once and cache it. We prefer natural-sounding neural voices when present.
-const VOICE_PREFERENCES = [
-  // Chrome on macOS / desktop — high-quality cloud voices
-  "Google US English",
-  "Google UK English Female",
-  "Google UK English Male",
-  // macOS / Safari — neural "Siri" voices are the most natural
-  "Samantha (Enhanced)",
-  "Alex (Enhanced)",
-  "Ava (Premium)",
-  "Ava (Enhanced)",
-  "Allison (Enhanced)",
-  "Samantha",
-  "Alex",
-  // Edge / Windows — neural "Online" voices
-  "Microsoft Aria Online (Natural) - English (United States)",
-  "Microsoft Jenny Online (Natural) - English (United States)",
-  "Microsoft Guy Online (Natural) - English (United States)",
-  "Microsoft Aria - English (United States)",
-];
-
-let cachedVoice = null;
-let voicesReady = false;
-
-function pickVoice() {
-  if (!("speechSynthesis" in window)) return null;
-  const voices = window.speechSynthesis.getVoices();
-  if (!voices || voices.length === 0) return null;
-
-  // Exact-name match against our preference list
-  for (const name of VOICE_PREFERENCES) {
-    const v = voices.find((x) => x.name === name);
-    if (v) return v;
+async function stopScribe(updateUi = true) {
+  if (!state.scribe) return;
+  const conn = state.scribe;
+  state.scribe = null;
+  // Tell the CLOSE handler this was a deliberate stop so it doesn't reconnect.
+  // Must be set BEFORE close() because close() fires CLOSE synchronously via
+  // the WebSocket onclose handler.
+  if (updateUi) {
+    state.stopRequested = true;
+    setMicState(false);
+    setStatus("idle", "idle");
   }
-  // Loose match: any en-US voice flagged as a "natural"/"neural"/"premium"
-  const enUS = voices.filter((v) => /^en[-_]US/i.test(v.lang));
-  const natural = enUS.find((v) =>
-    /natural|neural|premium|enhanced|online/i.test(v.name)
-  );
-  if (natural) return natural;
-  // Last resort: default en-US, then default voice
-  return (
-    enUS.find((v) => v.default) ||
-    enUS[0] ||
-    voices.find((v) => v.default) ||
-    voices[0]
-  );
+  // close() is the SDK's real teardown — it calls _audioCleanup() to stop the
+  // microphone stream and closes the WebSocket. disconnect() is a no-op
+  // callback trigger that leaves both the mic and socket open.
+  try { conn.close(); } catch (_) {}
 }
 
-function refreshVoice() {
-  cachedVoice = pickVoice();
-  voicesReady = !!cachedVoice;
+// The Scribe SDK doesn't expose a public mute API. The media track lives at
+// _mediaStreamTrack (set in Scribe.connect — see the IIFE bundle). Toggling
+// track.enabled keeps the track alive (no permission re-prompt, no audio
+// pipeline reset) but stops feeding samples to consumers — the standard
+// WebRTC mute pattern. Without this, Scribe transcribes the agent's own
+// TTS playback as a caller turn.
+function _scribeMicTrack() {
+  return state.scribe && state.scribe._mediaStreamTrack;
 }
 
-if ("speechSynthesis" in window) {
-  refreshVoice();
-  // Chrome fires voiceschanged once voices are actually loaded.
-  window.speechSynthesis.addEventListener("voiceschanged", refreshVoice);
+function pauseScribe() {
+  const track = _scribeMicTrack();
+  if (track) track.enabled = false;
 }
 
-function speak(text, onDone) {
-  if (!text) {
-    onDone && onDone();
-    return;
+function resumeScribe() {
+  const track = _scribeMicTrack();
+  if (track) track.enabled = true;
+}
+
+// ── ElevenLabs streaming TTS ────────────────────────────────────────────────
+
+async function speak(text, onDone) {
+  if (!text) { onDone && onDone(); return; }
+  if (!state.ttsOn) { onDone && onDone(); return; }
+
+  // Cancel any in-flight TTS first.
+  if (state.currentAudio) {
+    try { state.currentAudio.pause(); } catch (_) {}
+    state.currentAudio = null;
   }
-  if (!state.ttsOn || !("speechSynthesis" in window)) {
-    onDone && onDone();
-    return;
-  }
+
   setStatus("speaking", "speaking");
-  window.speechSynthesis.cancel();
+  await pauseScribe();
 
-  if (!cachedVoice) refreshVoice();
+  let audio;
+  try {
+    const res = await fetch("/api/tts/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `tts ${res.status}`);
+    }
+    const blob = await res.blob();
+    audio = new Audio(URL.createObjectURL(blob));
+    state.currentAudio = audio;
 
-  const u = new SpeechSynthesisUtterance(text);
-  if (cachedVoice) {
-    u.voice = cachedVoice;
-    u.lang = cachedVoice.lang || "en-US";
-  } else {
-    u.lang = "en-US";
+    audio.onended = async () => {
+      state.currentAudio = null;
+      setStatus("idle", "idle");
+      await resumeScribe();
+      onDone && onDone();
+    };
+    audio.onerror = async () => {
+      state.currentAudio = null;
+      setStatus("idle", "idle");
+      await resumeScribe();
+      onDone && onDone();
+    };
+    audio.play().catch(async (e) => {
+      console.warn("audio play blocked", e);
+      state.currentAudio = null;
+      setStatus("idle", "idle");
+      await resumeScribe();
+      onDone && onDone();
+    });
+  } catch (e) {
+    console.error("tts failed", e);
+    setStatus("tts error", "error");
+    await resumeScribe();
+    onDone && onDone();
   }
-  u.rate = 1.0;
-  u.pitch = 1.0;
-  u.volume = 1.0;
-  u.onend = () => {
-    setStatus("idle", "idle");
-    onDone && onDone();
-  };
-  u.onerror = () => {
-    setStatus("idle", "idle");
-    onDone && onDone();
-  };
-  window.speechSynthesis.speak(u);
 }
 
 // ── Backend round-trip ──────────────────────────────────────────────────────
@@ -354,19 +389,13 @@ async function classifyAndRespond() {
   setBusy(true);
   setStatus("thinking", "thinking");
 
-  // Pause STT during the round-trip; we'll restart based on the result.
-  try { state.recognition && state.recognition.stop(); } catch (e) {}
-
   const phone = els.phone.value.trim() || null;
   let pred;
   try {
     const resp = await fetch("/api/classify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        turns: state.turns,
-        caller_phone: phone,
-      }),
+      body: JSON.stringify({ turns: state.turns, caller_phone: phone }),
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ error: resp.statusText }));
@@ -383,21 +412,15 @@ async function classifyAndRespond() {
   showCallerProfile(pred.caller_profile);
   showResult(pred);
 
-  const needsMore =
-    pred.needs_clarification && pred.clarification_question;
+  const needsMore = pred.needs_clarification && pred.clarification_question;
 
   if (needsMore) {
     const question = pred.clarification_question;
     pushTurn("agent", question);
     setBusy(false);
-    speak(question, () => {
-      // Resume listening for the caller's answer.
-      if (state.listening) safeStart();
-    });
+    speak(question);
   } else {
-    // Final response: read back the dispatch summary and close the call.
     state.callClosed = true;
-    setMicState(false);
     const dispatched = pred.dispatched_vendor_id
       ? ` Dispatched ${pred.dispatched_vendor_id}.`
       : pred.needs_human_review
@@ -406,7 +429,8 @@ async function classifyAndRespond() {
     const spoken = (pred.call_summary || "Got it.") + dispatched;
     pushTurn("agent", spoken);
     setBusy(false);
-    speak(spoken, () => {
+    speak(spoken, async () => {
+      await stopScribe();
       setStatus("call closed", "idle");
     });
   }
@@ -414,15 +438,46 @@ async function classifyAndRespond() {
 
 // ── Wiring ──────────────────────────────────────────────────────────────────
 
-els.micBtn.addEventListener("click", () => {
-  if (state.callClosed) {
-    // start a fresh call automatically
-    resetAll();
+async function startListening() {
+  if (!Scribe) {
+    setStatus("voice unavailable", "error");
+    alert("ElevenLabs client failed to load. Check network or use the text input.");
+    return;
   }
+
+  // Open with an agent greeting so the conversation has an anchor turn.
+  if (state.turns.length === 0) {
+    const greeting = "CBRE maintenance, what's going on?";
+    pushTurn("agent", greeting);
+    setMicState(true);
+    try {
+      state.scribe = await startScribe();
+    } catch (e) {
+      console.error("scribe start failed", e);
+      setStatus("voice unavailable", "error");
+      setMicState(false);
+      return;
+    }
+    speak(greeting);
+    return;
+  }
+
+  setMicState(true);
+  try {
+    state.scribe = await startScribe();
+  } catch (e) {
+    console.error("scribe start failed", e);
+    setStatus("voice unavailable", "error");
+    setMicState(false);
+  }
+}
+
+els.micBtn.addEventListener("click", async () => {
+  if (state.callClosed) resetAll();
   if (state.listening) {
-    stopListening();
+    await stopScribe();
   } else {
-    startListening();
+    await startListening();
   }
 });
 
@@ -432,59 +487,52 @@ els.ttsToggle.addEventListener("click", () => {
   state.ttsOn = !state.ttsOn;
   els.ttsToggle.setAttribute("aria-pressed", state.ttsOn ? "true" : "false");
   els.ttsToggle.textContent = `TTS: ${state.ttsOn ? "on" : "off"}`;
-  if (!state.ttsOn) window.speechSynthesis.cancel();
+  if (!state.ttsOn && state.currentAudio) {
+    try { state.currentAudio.pause(); } catch (_) {}
+    state.currentAudio = null;
+  }
 });
 
 // Text composer — typed messages share the same classify pipeline as voice.
-els.composer.addEventListener("submit", (e) => {
+els.composer.addEventListener("submit", async (e) => {
   e.preventDefault();
   const text = els.textInput.value.trim();
   if (!text || state.busy) return;
 
-  // If a prior call closed, start a fresh session on send.
-  if (state.callClosed) {
-    resetAll();
-  }
+  if (state.callClosed) resetAll();
+  if (state.listening) await stopScribe();
 
-  // Stop the mic loop if it was running — we don't want the recognizer
-  // to grab the user's typed turn and re-classify mid-flight.
-  if (state.listening) stopListening();
-
-  // Seed an agent greeting on the very first turn so the LLM has the
-  // canonical [agent, caller, ...] shape the agent expects.
-  if (state.turns.length === 0) {
-    pushTurn("agent", "CBRE maintenance, what's going on?");
-  }
+  if (state.turns.length === 0) pushTurn("agent", "CBRE maintenance, what's going on?");
 
   pushTurn("caller", text);
   els.textInput.value = "";
   classifyAndRespond();
 });
 
-function resetAll() {
-  stopListening();
-  window.speechSynthesis && window.speechSynthesis.cancel();
+async function resetAll() {
+  await stopScribe();
+  if (state.currentAudio) {
+    try { state.currentAudio.pause(); } catch (_) {}
+    state.currentAudio = null;
+  }
   state.turns = [];
-  state.pendingInterim = null;
+  state.pendingInterim = "";
   state.callClosed = false;
   state.busy = false;
   setBusy(false);
   renderTurns();
   els.result.hidden = true;
   els.summary.textContent = "";
-  els.resultBody.innerHTML = "";
+  els.resultBody.replaceChildren();
   els.textInput.value = "";
   showCallerProfile(null);
   setStatus("idle", "idle");
 }
 
-// First-run feature check — voice is best-effort, typing always works.
-if (!SpeechRecognitionImpl) {
+// First-run feature check.
+if (!Scribe) {
   els.micBtn.disabled = true;
   els.micLabel.textContent = "Voice unavailable";
-  els.hint.innerHTML =
-    "Voice not supported in this browser — you can still type below. " +
-    "For voice, use <b>Chrome</b> or <b>Edge</b>.";
+  els.hint.textContent =
+    "ElevenLabs client failed to load — you can still type below.";
 }
-
-setStatus("idle", "idle");

@@ -140,6 +140,33 @@ _DANGER_WORDS_RE = _compile_kw_regex(
 )
 
 
+# ── OpenAI prompt-cache telemetry ────────────────────────────────────────────
+#
+# OpenAI returns the cache-hit count under usage.prompt_tokens_details.cached_tokens.
+# LangChain surfaces the raw usage dict on AIMessage.response_metadata['token_usage'].
+# Logging it lets us verify the cache-prefix layout is actually working — a cold
+# call shows cached=0, every subsequent call within the 5-10 min sliding window
+# should show cached ≈ system_prompt_tokens.
+
+
+def _log_cache_usage(node_name: str, response) -> None:
+    """Print a one-line cache-hit summary if the response surfaces token usage.
+
+    Silent no-op when the SDK didn't expose token_usage (e.g. on errors).
+    """
+    try:
+        meta = getattr(response, "response_metadata", None) or {}
+        usage = meta.get("token_usage") or meta.get("usage") or {}
+        prompt = usage.get("prompt_tokens", 0)
+        details = usage.get("prompt_tokens_details") or {}
+        cached = details.get("cached_tokens", 0) if isinstance(details, dict) else 0
+        if prompt:
+            pct = (cached / prompt * 100) if cached else 0
+            print(f"[cache] {node_name}: cached={cached}/{prompt} ({pct:.0f}%)")
+    except Exception:  # noqa: BLE001 — telemetry never fails the call
+        pass
+
+
 # ── Per-node latency instrumentation ─────────────────────────────────────────
 
 

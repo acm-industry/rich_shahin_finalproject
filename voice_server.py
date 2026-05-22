@@ -15,10 +15,12 @@ Then open http://localhost:8000/ in Chrome or Edge.
 from __future__ import annotations
 
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
+from elevenlabs import ElevenLabs
 from langchain_openai import ChatOpenAI
 
 from agent import (
@@ -28,6 +30,7 @@ from agent import (
     _lookup_profile,
     make_extract_and_check,
 )
+from agent.config import CATEGORY_SUBCATEGORIES, _buildings
 
 HERE = Path(__file__).resolve().parent
 STATIC_DIR = HERE / "static"
@@ -42,6 +45,79 @@ MAX_FOLLOWUP_TURNS = 4      # after this many follow-ups, give up and escalate t
 # Standalone extractor for the voice-mode pre-check. Same LLM the graph uses.
 _LLM_MINI = ChatOpenAI(model="gpt-4.1-mini", temperature=0, max_retries=3, request_timeout=20)
 _VOICE_EXTRACTOR = make_extract_and_check(_LLM_MINI)
+
+# ── ElevenLabs (Scribe v2 realtime STT + Flash v2.5 streaming TTS) ───────────
+# Optional: server runs without it, but /api/scribe-token + /api/tts/stream
+# return 503 and the UI falls back to a "voice unavailable" message.
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+_EL: ElevenLabs | None = ElevenLabs(api_key=ELEVENLABS_API_KEY) if ELEVENLABS_API_KEY else None
+
+# Sarah — soft / conversational. Chosen for empathy with stressed callers.
+TTS_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
+# Flash v2.5 — ~75ms TTFB, multilingual, the lowest-latency realtime model.
+TTS_MODEL_ID = "eleven_flash_v2_5"
+# MP3 streams cleanly into a browser <audio> element; cheap to proxy.
+TTS_OUTPUT_FORMAT = "mp3_44100_128"
+
+
+_KEYTERM_MAX_LEN = 20  # ElevenLabs Scribe per-keyterm hard cap
+
+
+def _shorten_keyterm(name: str) -> str | None:
+    """Reduce a building name to a ≤20-char anchor that Scribe will accept.
+
+    Drops everything past the longest leading word-prefix that still fits in 20
+    chars. "Westfield Commerce Center" → "Westfield Commerce" (18). If even the
+    first word exceeds 20, truncates it. Returns None for empty input.
+    """
+    name = (name or "").strip()
+    if not name:
+        return None
+    if len(name) <= _KEYTERM_MAX_LEN:
+        return name
+    words = name.split()
+    out = words[0][:_KEYTERM_MAX_LEN]
+    for w in words[1:]:
+        candidate = f"{out} {w}"
+        if len(candidate) > _KEYTERM_MAX_LEN:
+            break
+        out = candidate
+    return out
+
+
+def _build_keyterms() -> list[str]:
+    """Bias Scribe toward domain proper nouns the model would otherwise mishear.
+
+    Source: shortened building anchors + the 36 spoken-form subcategory
+    phrases + a small set of high-value domain words. Each term is ≤20 chars
+    per the Scribe API limit, deduped case-insensitively, capped at 100 total.
+    """
+    raw: list[str] = []
+    for b in _buildings:
+        s = _shorten_keyterm(b.get("name"))
+        if s:
+            raw.append(s)
+    for subs in CATEGORY_SUBCATEGORIES.values():
+        raw.extend(s.replace("_", " ") for s in subs)
+    raw.extend([
+        "HVAC", "leak", "emergency", "evacuate", "smoke", "gas", "fire",
+        "elevator", "entrapment", "outage", "flooding", "alarm", "CBRE",
+    ])
+    seen, out = set(), []
+    for t in raw:
+        t = t.strip()
+        if not t or len(t) > _KEYTERM_MAX_LEN:
+            continue
+        if t.lower() in seen:
+            continue
+        seen.add(t.lower())
+        out.append(t)
+        if len(out) >= 100:
+            break
+    return out
+
+
+_KEYTERMS = _build_keyterms()
 
 
 def _caller_word_count(turns: list[dict]) -> int:
@@ -115,6 +191,29 @@ def classify_voice(turns: list[dict], caller_phone: str | None) -> dict:
         ):
             return _build_clarification_response(
                 extract_out["follow_ups"][0],
+                profile,
+            )
+
+        # 3) Location floor: the extractor's prompt only flags "conflicting"
+        # location, not missing — and the graph's clarification gate has no
+        # missing-building heuristic either. Voice mode dispatches against a
+        # real building, so require one explicitly: either the caller named
+        # it (building_name or address) or the phone matched a known profile.
+        ent = extract_out.get("entity") or {}
+        has_extracted_location = bool(
+            (ent.get("building_name") or "").strip()
+            or (ent.get("address") or "").strip()
+        )
+        has_profile_location = bool(
+            profile and (
+                profile.get("primary_building_name")
+                or profile.get("primary_building_id")
+            )
+        )
+        if not has_extracted_location and not has_profile_location:
+            return _build_clarification_response(
+                "Which building is this happening at? You can give me the "
+                "building name or street address.",
                 profile,
             )
 
@@ -195,6 +294,44 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
+    def _stream_tts(self, text: str) -> None:
+        """Proxy ElevenLabs Flash v2.5 streaming TTS to the browser as MP3.
+
+        Each yielded chunk is forwarded immediately so playback can begin
+        before the full utterance is rendered (~75ms TTFB with Flash).
+        """
+        try:
+            audio_iter = _EL.text_to_speech.stream(
+                voice_id=TTS_VOICE_ID,
+                text=text,
+                model_id=TTS_MODEL_ID,
+                output_format=TTS_OUTPUT_FORMAT,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._send_json(502, {"error": f"tts upstream error: {exc}"})
+            return
+
+        # Under BaseHTTPRequestHandler's default HTTP/1.0, Transfer-Encoding:
+        # chunked is not honored cleanly by browsers (curl was permissive,
+        # Chrome wasn't — got NotSupportedError on <audio> playback). The
+        # robust no-Content-Length pattern here is Connection: close + write
+        # raw bytes; the browser reads until EOF and decodes the full MP3.
+        self.send_response(200)
+        self.send_header("Content-Type", "audio/mpeg")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        try:
+            for chunk in audio_iter:
+                if chunk:
+                    self.wfile.write(chunk)
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            # Client navigated away or hit barge-in mid-stream. Expected.
+            pass
+
     def do_GET(self):
         url = urlparse(self.path)
         path = url.path
@@ -223,10 +360,61 @@ class Handler(BaseHTTPRequestHandler):
             self._send_file(target, ctype)
             return
 
+        if path == "/api/keyterms":
+            self._send_json(200, {"keyterms": _KEYTERMS})
+            return
+
+        if path == "/api/scribe-token":
+            if _EL is None:
+                self._send_json(503, {"error": "ELEVENLABS_API_KEY not configured"})
+                return
+            try:
+                token = _EL.tokens.single_use.create(token_type="realtime_scribe")
+            except Exception as exc:  # noqa: BLE001
+                self._send_json(502, {"error": f"token mint failed: {exc}"})
+                return
+            self._send_json(200, {"token": token.token})
+            return
+
+        # GET form for TTS — kept for quick curl testing. POST is preferred
+        # for production because long text overflows URL length limits.
+        if path == "/api/tts/stream":
+            if _EL is None:
+                self._send_json(503, {"error": "ELEVENLABS_API_KEY not configured"})
+                return
+            qs = parse_qs(url.query)
+            text = (qs.get("text") or [""])[0].strip()
+            if not text:
+                self._send_json(400, {"error": "missing text"})
+                return
+            self._stream_tts(text)
+            return
+
         self.send_error(404)
 
     def do_POST(self):
         url = urlparse(self.path)
+
+        if url.path == "/api/tts/stream":
+            if _EL is None:
+                self._send_json(503, {"error": "ELEVENLABS_API_KEY not configured"})
+                return
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0 or length > 100_000:
+                self._send_json(400, {"error": "missing or oversized body"})
+                return
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            except json.JSONDecodeError as e:
+                self._send_json(400, {"error": f"bad json: {e}"})
+                return
+            text = (payload.get("text") or "").strip()
+            if not text:
+                self._send_json(400, {"error": "text required"})
+                return
+            self._stream_tts(text)
+            return
+
         if url.path != "/api/classify":
             self.send_error(404)
             return
@@ -271,6 +459,13 @@ def main() -> None:
 
     print(f"Warming graph…")
     _get_eval_graph()  # eager compile so first request isn't slow
+
+    if _EL is None:
+        print("⚠  ELEVENLABS_API_KEY not set — /api/scribe-token + /api/tts/stream "
+              "will return 503; UI will fall back to typed-only mode.")
+    else:
+        print(f"ElevenLabs voice: Scribe v2 realtime STT + {TTS_MODEL_ID} TTS "
+              f"(voice {TTS_VOICE_ID}, {len(_KEYTERMS)} keyterms)")
 
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"Voice demo listening on http://localhost:{PORT}/")
