@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CBRE Voice Dispatch</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="dot"></span>
+        <span>CBRE Voice Dispatch</span>
+      </div>
+      <div class="status" id="status">idle</div>
+    </header>
+
+    <section class="controls">
+      <label class="field">
+        <span>Caller phone (optional)</span>
+        <input
+          id="phone"
+          type="tel"
+          placeholder="+1-415-555-0139"
+          autocomplete="off"
+        />
+      </label>
+      <div class="caller-info" id="callerInfo" hidden></div>
+      <div class="buttons">
+        <button id="micBtn" class="mic" type="button" aria-pressed="false">
+          <span class="mic-ico" aria-hidden="true"></span>
+          <span class="mic-label">Start call</span>
+        </button>
+        <button id="resetBtn" class="ghost" type="button">Reset</button>
+        <button id="ttsToggle" class="ghost" type="button" aria-pressed="true">
+          TTS: on
+        </button>
+      </div>
+    </section>
+
+    <section class="transcript" id="transcript" aria-live="polite"></section>
+
+    <form class="composer" id="composer" autocomplete="off">
+      <input
+        id="textInput"
+        type="text"
+        placeholder="Type a message and press Enter…"
+        aria-label="Message"
+      />
+      <button id="sendBtn" class="send" type="submit" aria-label="Send">
+        Send
+      </button>
+    </form>
+
+    <section class="result" id="result" hidden>
+      <h2>Dispatch result</h2>
+      <dl id="resultBody"></dl>
+      <p class="summary" id="summary"></p>
+    </section>
+
+    <footer class="foot">
+      <span id="hint">Click <b>Start call</b> to speak, or type below. Chrome / Edge recommended for voice.</span>
+    </footer>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
