@@ -26,8 +26,9 @@ from langchain_chroma import Chroma
 from langchain_openai import ChatOpenAI
 
 from .config import _building_by_name
-from .prompts import CLASSIFY_PROMPT, _BUILDINGS_BLOCK, _TAXONOMY_BLOCK
+from .prompts import CLASSIFY_SYSTEM_PROMPT, CLASSIFY_USER_TEMPLATE
 from .state import WorkflowState
+from .utils import _log_cache_usage
 
 
 def build_enriched_query(state: WorkflowState):
@@ -241,22 +242,27 @@ def make_classify_issue(llm: ChatOpenAI):
         reasons = list(state.get("clarification_reasons") or ())
         gate_verdict = state.get("gate_clarification_verdict", False)
 
-        prompt = CLASSIFY_PROMPT.format(
-            taxonomy=_TAXONOMY_BLOCK,
-            buildings=_BUILDINGS_BLOCK,
+        # System message is byte-stable across every call (taxonomy + buildings
+        # + rules pre-interpolated at module load). User message holds 100% of
+        # the per-call dynamic payload so it never interrupts the cached prefix.
+        user_message = CLASSIFY_USER_TEMPLATE.format(
+            gate_verdict=gate_verdict,
+            clarification_reasons=reasons,
             rag_context=state.get("retrieved_context", "None"),
             entities=entities_str,
             transcript=state["transcript"],
             profile_context=profile_context,
-            gate_verdict=gate_verdict,
-            clarification_reasons=reasons,
         )
 
         response = llm.invoke(
-            [{"role": "user", "content": prompt}],
+            [
+                {"role": "system", "content": CLASSIFY_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
             response_format={"type": "json_object"},
         )
 
+        _log_cache_usage("classify_issue", response)
         raw = json.loads(response.content)
         return {"classification": raw}
 

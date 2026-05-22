@@ -23,9 +23,9 @@ from langchain_openai import ChatOpenAI
 from langgraph.types import interrupt
 
 from .config import SUBCATEGORY_TO_CATEGORY, _building_by_id
-from .prompts import EXTRACT_AND_CHECK_PROMPT
+from .prompts import EXTRACT_SYSTEM_PROMPT, EXTRACT_USER_TEMPLATE
 from .state import ClarificationDecision, EntityWithQuality, WorkflowState
-from .utils import _match_building, _normalize_floor
+from .utils import _log_cache_usage, _match_building, _normalize_floor
 
 
 # ── Clarification-gate heuristics ────────────────────────────────────────────
@@ -185,7 +185,10 @@ def make_extract_and_check(llm: ChatOpenAI):
     Skips re-extraction when state.extraction_complete is already True
     (set on previous iteration of the gather_followup loop).
     """
-    extractor = llm.with_structured_output(EntityWithQuality)
+    # include_raw=True returns {"raw": AIMessage, "parsed": EntityWithQuality, ...}
+    # so we can both get the structured entity AND surface cache-hit telemetry
+    # from raw.response_metadata.
+    extractor = llm.with_structured_output(EntityWithQuality, include_raw=True)
 
     def extract_and_check(state: WorkflowState):
         description = state["transcript"]
@@ -201,10 +204,19 @@ def make_extract_and_check(llm: ChatOpenAI):
         if state.get("extraction_complete"):
             return {"follow_ups": [], "needs_clarification": False}
 
-        result = extractor.invoke(
-            EXTRACT_AND_CHECK_PROMPT.format(description=description)
-        )
-        data = result.model_dump(mode="json")
+        # System message is byte-stable — the per-call caller description is
+        # the only dynamic content, isolated in the user message.
+        out = extractor.invoke([
+            {"role": "system", "content": EXTRACT_SYSTEM_PROMPT},
+            {"role": "user", "content": EXTRACT_USER_TEMPLATE.format(description=description)},
+        ])
+        _log_cache_usage("extract_and_check", out.get("raw"))
+        parsed = out.get("parsed")
+        if parsed is None:
+            # parsing failed — fall back to a permissive default so the graph
+            # can still continue (downstream nodes tolerate missing fields).
+            return {"follow_ups": [], "extraction_complete": True, "needs_clarification": False}
+        data = parsed.model_dump(mode="json")
 
         # Split into entity fields and quality fields
         entity = {
