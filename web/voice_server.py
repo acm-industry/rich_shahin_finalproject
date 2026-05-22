@@ -38,8 +38,12 @@ INDEX_FILE = STATIC_DIR / "index.html"
 
 PORT = 8000
 
-# Voice-mode gating thresholds
-MIN_CALLER_WORDS = 8        # below this, ALWAYS ask for more — too sparse to classify
+# Voice-mode gating thresholds.
+# We deliberately do NOT keep a "minimum caller words" floor — even a 2-word
+# input like "door's broken" should run through the extractor so the LLM can
+# generate a contextual followup question ("Can the door be secured?", "Is it
+# a security door?") instead of falling back to a robotic generic prompt.
+# The only hard guard is below: zero caller words → ask "what's happening?".
 MAX_FOLLOWUP_TURNS = 4      # after this many follow-ups, give up and escalate to HITL
 
 # Standalone extractor for the voice-mode pre-check. Same LLM the graph uses.
@@ -163,17 +167,18 @@ def classify_voice(turns: list[dict], caller_phone: str | None) -> dict:
     followups_asked = _agent_turn_count(turns)
 
     if followups_asked < MAX_FOLLOWUP_TURNS:
-        # 1) Hard floor: too few caller words to classify on
-        if caller_words < MIN_CALLER_WORDS:
+        # 1) Zero-caller-words guard: nothing to extract from. Cheap, deterministic.
+        if caller_words == 0:
             return _build_clarification_response(
-                "Could you tell me a bit more about what's going wrong — "
-                "what specifically isn't working, where, and how long it's "
-                "been like that?",
+                "I didn't catch that — what's happening?",
                 profile,
             )
 
-        # 2) Soft check: ask the extractor — is the description specific
-        # enough and the location complete?
+        # 2) Soft check: ALWAYS run the extractor (no word-count floor) so the
+        # LLM produces a contextual question even for short input. The
+        # extractor's followup_question is far better than any canned generic
+        # text — "Can the door be secured?" beats "Could you tell me a bit
+        # more about what's going wrong…".
         pre_state = {
             "transcript": transcript,
             "caller_profile": profile,
@@ -185,14 +190,16 @@ def classify_voice(turns: list[dict], caller_phone: str | None) -> dict:
         except Exception:
             extract_out = {}
 
-        if (
-            not extract_out.get("extraction_complete", True)
-            and extract_out.get("follow_ups")
-        ):
-            return _build_clarification_response(
-                extract_out["follow_ups"][0],
-                profile,
-            )
+        # Fire the extractor's follow-up if it produced one AND either
+        # extraction is incomplete OR the extractor flagged needs_clarification
+        # (latter is the Tier 2 playbook path: description is specific + location
+        # is left to the deterministic check, but a safety/severity dimension
+        # is still unanswered — e.g. "Is the water spreading?").
+        follow_ups = extract_out.get("follow_ups") or []
+        needs_clar = extract_out.get("needs_clarification", False)
+        extraction_complete = extract_out.get("extraction_complete", True)
+        if follow_ups and (not extraction_complete or needs_clar):
+            return _build_clarification_response(follow_ups[0], profile)
 
         # 3) Location floor: the extractor's prompt only flags "conflicting"
         # location, not missing — and the graph's clarification gate has no
