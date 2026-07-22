@@ -1,4 +1,4 @@
-# UCSB Agentic AI — Final Project
+# Turing Sample Pipeline
 
 Build a Human-in-the-Loop (HITL) agentic voice bot that automates an international
 commercial-real-estate call center. Read **`final-assignment.html`** for the full
