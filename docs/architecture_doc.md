@@ -2,7 +2,7 @@
 
 **Status:** Final
 **Owners:** Shahin Sheikh, Rich
-**Scope:** `agent/` package and its immediate dependencies (`build_chroma.py`, `fit_risk_policy.py`, `operational/*`, `models/risk_policy.json`).
+**Scope:** `agent/` package and its immediate dependencies (`scripts/build_chroma.py`, `scripts/fit_risk_policy.py`, `operational/*`, `models/risk_policy.json`).
 **Audience:** Engineering reviewers, ops stakeholders, and anyone extending the pipeline.
 
 ---
@@ -15,7 +15,7 @@ CBRE's facilities operators field ~10K facilities calls per day across a portfol
 
 This agent is the auto-resolve path. It ingests a multi-turn caller dialogue and emits a structured triage decision: a `(category, subcategory, risk_level)` from a 10-category × 36-subcategory taxonomy, the canonical building/floor/address, a selected vendor (or a flag that no vendor qualifies), and an audit-grade trainer log. It also decides whether to dispatch emergency services, ask the caller one clarifying question, or hand the call to a human reviewer.
 
-The grader weights accuracy across six axes (subcategory, risk level, HITL-F1, clarification-F1, location, vendor match) with a hard-fail penalty for false emergency dispatch. Those evaluation pressures are reflected directly in the architecture: most of the deterministic guards exist to satisfy a specific axis of the rubric while keeping the LLM in the loop for tasks where it has an edge (natural language → structured intent).
+The grader weights accuracy across six axes (subcategory, risk level, HITL-F1, clarification-F1, location, vendor match) with a hard-fail penalty for false emergency dispatch. Those axes mirror the real costs of the problem, and the architecture follows them: each deterministic guard protects against one specific kind of expensive error, while the LLM handles the task where it has an edge (natural language → structured intent).
 
 ---
 
@@ -57,7 +57,7 @@ START
  → END
 ```
 
-A rendered Mermaid version lives at [agent_graph.mmd](agent_graph.mmd) and [agent_graph.png](agent_graph.png). (The `.mmd` file shows an earlier `xgb_review_predictor` node that has since been removed from the wired graph; the current authoritative flow is the one above, encoded in [graph.py:71](../agent/graph.py:71).)
+A rendered Mermaid version lives at [agent_graph.mmd](agent_graph.mmd) and [agent_graph.png](agent_graph.png). Both are generated from the compiled graph by [render_graph.py](../scripts/render_graph.py); the wiring itself is in [graph.py:71](../agent/graph.py:71).
 
 ### 3.1 Public API
 
@@ -68,7 +68,7 @@ A single entry point — [`classify(turns, caller_phone) -> dict`](../agent/grap
 The compiled graph is cached as a module-level singleton in [`_get_eval_graph`](../agent/graph.py:139). On first call we pay:
 
 - LLM client construction (cheap)
-- Chroma store open (sub-second; the DB is pre-built by [build_chroma.py](../build_chroma.py))
+- Chroma store open (sub-second; the DB is pre-built by [build_chroma.py](../scripts/build_chroma.py))
 - `risk_policy.json` load (kilobytes, ~ms)
 
 Subsequent calls reuse the compiled graph. Operational JSON (buildings, vendors, profiles, taxonomy) is loaded once at `config.py` import time and exposed as pre-built `dict` indices for O(1) lookups.
@@ -196,7 +196,7 @@ A second-line `_DANGER_WORDS_RE` fallback ([utils.py:138](../agent/utils.py:138)
 
 ### ADR-08: Historical-policy risk cap (demote-only)
 
-**Decision.** For each subcategory, compute the highest risk band that ≥3% of historical tickets ever reached, and cap the LLM's emission to that band ([risk.py:141–170](../agent/risk.py:141), [fit_risk_policy.py](../fit_risk_policy.py)).
+**Decision.** For each subcategory, compute the highest risk band that ≥3% of historical tickets ever reached, and cap the LLM's emission to that band ([risk.py:141–170](../agent/risk.py:141), [fit_risk_policy.py](../scripts/fit_risk_policy.py)).
 
 **Rationale.** The 10K-ticket historical corpus is the empirical distribution; the LLM's predictions should not regularly exceed bands that real ops never reached. The 3% threshold is forgiving enough not to suppress rare-but-real emergencies while catching cases like "leaky faucet → HIGH".
 
@@ -373,15 +373,13 @@ The agent acts in the real world: it dispatches vendors and (conditionally) emer
 2. **Cold-start retrieval quality.** New buildings or new vendor types are invisible to RAG until the Chroma index is rebuilt. There is no online-learning path.
 3. **Sequential LLM calls.** A speculative-retrieval optimization could overlap extraction and retrieval, at the cost of retrieval quality. Not implemented.
 4. **No structured output for the call summary.** The summary is free text and is only post-validated by a length check + fallback template ([hitl.py:140](../agent/hitl.py:140)).
-5. **The `.mmd` graph in [docs/agent_graph.mmd](agent_graph.mmd) is stale** — it shows a removed `xgb_review_predictor` node. The canonical flow is in [graph.py:71](../agent/graph.py:71).
-6. **Risk policy is a static artifact.** [`fit_risk_policy.py`](../fit_risk_policy.py) is run offline. There is no scheduled refresh and no canary for the policy artifact.
+5. **The over-escalation traps are keyword rules written from dev-set errors.** They may not generalize to new phrasing and can misfire (a real fire involving a microwave matches the burnt-food trap). Every rewrite is routed to human review, and the case is recorded as an expected failure in [tests/test_risk_guards.py](../tests/test_risk_guards.py). At scale we would replace the keyword lists with a classifier trained on the QA audit data and on reviewer overrides from the trainer log, keeping the emergency allowlist as a hard rule.
+6. **Risk policy is a static artifact.** [`fit_risk_policy.py`](../scripts/fit_risk_policy.py) is run offline. There is no scheduled refresh and no canary for the policy artifact.
 
 ---
 
 ## 9. References
 
 - [LangGraph documentation](https://langchain-ai.github.io/langgraph/) — graph orchestration and `interrupt()` semantics.
-- [final-assignment.html](../final-assignment.html) — original rubric and scoring contract.
-- [assignment_brief.md](../assignment_brief.md) — one-page recap of the task.
 - [evaluation/scoring.py](../evaluation/scoring.py) — authoritative scoring function used for both dev and test sets.
 - C4 model and lightweight ADR conventions informed the structure of this document.

@@ -1,6 +1,22 @@
-chroma_db/
+# Secrets
 .env
+
+# Python
+.venv/
 __pycache__/
 *.pyc
-preds_*.json
+.pytest_cache/
+
+# Generated artifacts (rebuild with scripts/build_chroma.py / evaluation/run_eval.py)
+chroma_db/
 predictions.json
+preds_*.json
+
+# OS / editor / coding-assistant tooling
+.DS_Store
+.agents/
+skills-lock.json
+
+# Course handout (not redistributed)
+final-assignment.html
+assignment_brief.md

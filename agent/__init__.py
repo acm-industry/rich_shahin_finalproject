@@ -26,7 +26,7 @@ specific deliverable mapping:
                       validator_gate, override_node, make_trainer_log
     graph.py        - LangGraph wiring + the classify() entry point
 
-For graph visualization, see `render_graph.py` at the repo root.
+For graph visualization, see `scripts/render_graph.py`.
 """
 from .graph import _build_graph, _format_prediction, _get_eval_graph, classify
 from .intake import make_extract_and_check
